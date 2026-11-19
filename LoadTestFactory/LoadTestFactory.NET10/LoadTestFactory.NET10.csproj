@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Version>0.1.0-preview.1</Version>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>LoadTestFactory</AssemblyName>
+    <PackageId>LoadTestFactory</PackageId>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <RootNamespace>LoadTestFactory</RootNamespace>
+    <Title>LoadTest Factory</Title>
+    <AssemblyTitle>LoadTest Factory</AssemblyTitle>
+    <Authors>Vladimir Kramar</Authors>
+    <Company>KramarDev</Company>
+    <Product>LoadTest Factory</Product>
+    <Copyright>Copyright © 2026 Vladimir Kramar</Copyright>
+    <PackageProjectUrl>https://github.com/vkramar-dev/loadtest-factory</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/vkramar-dev/loadtest-factory</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Description>LoadTest Factory is a lightweight, dependency-free HTTP load testing library for .NET.
+
+It provides a simple C# API for defining and executing concurrent test scenarios, measuring performance, collecting detailed metrics, and generating self-contained HTML reports.
+
+Designed for developers who want to focus on testing their applications rather than building load testing infrastructure.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>load-testing;performance;performance-testing;stress-testing;http;api;benchmark;dotnet;csharp;testing</PackageTags>
+    <PackageIcon>loadtest-icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+	<ItemGroup>
+		<None Update="loadtest-icon.png" Pack="true" PackagePath="" />
+
+		<None Include="..\..\README.md" Pack="true" PackagePath="" />
+
+		<None Include="..\..\LICENSE" Pack="true" PackagePath="" />
+	</ItemGroup>
+
+</Project>
