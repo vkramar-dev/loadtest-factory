@@ -5,14 +5,21 @@ namespace LoadTestFactory.Measurements;
 
 unsafe internal sealed class MetricsCollector : IDisposable
 {
-    List<string> ResultTypes = new List<string>(["Success"]);
+    public List<string> ResultTypes = new List<string>(["Success"]);
+
     const int Capacity = 1_000_000;
     Measurement* _measurements = null;
     Measurement* _measurements_reserved = null;
     volatile int _MeasurementSegmentCounter = 0;
     int _index = 0;
+
+    // One writer per collector; the monitoring timer only reads these counters.
+    // Do not derive progress from _MeasurementSegmentCounter, which is updated
+    // after asynchronous disk serialization.
+    private long _completedExecutions;
+    private long _failedExecutions;
     readonly int _collectorNumber;
-    Task _AllocNewMemory = Task.CompletedTask;
+    private Task _AllocNewMemory = Task.CompletedTask;
 
     public MetricsCollector(int collectorNumber)
     {
@@ -79,16 +86,15 @@ unsafe internal sealed class MetricsCollector : IDisposable
             // TODO: comment
             Measurement blockingMeasurement = new(0, startAt, Stopwatch.GetTimestamp() - startAt);
             AddMeasurementWithError(ref blockingMeasurement, "Performance Blocking");
-            Console.WriteLine("TEMP: BLOCK!");
+            Console.WriteLine($"BLOCKING !!!, ElapsedTicks: {blockingMeasurement.ElapsedTicks}");
         }
 
-        _AllocNewMemory = Task.Run(() =>
+        _AllocNewMemory = Task.Factory.StartNew(() =>
         {
             string backupFileName = Path.Combine(
                                         LoadTestRunner.PathToFolder,
                                         $"load_test_{_collectorNumber}_{_MeasurementSegmentCounter}.bin");
 
-            Console.WriteLine($"TEMP: MetricsCollector #{_collectorNumber}, File: {backupFileName}");
 
             ReadOnlySpan<byte> bytes = new(oldAddress, checked(Capacity * sizeof(Measurement)));
 
@@ -104,8 +110,21 @@ unsafe internal sealed class MetricsCollector : IDisposable
                                                                     (nuint)sizeof(Measurement));
 
             ++_MeasurementSegmentCounter;
-        });
+
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
+
+    public void RecordScenarioCompletion(bool failed)
+    {
+        Volatile.Write(ref _completedExecutions, _completedExecutions + 1);
+
+        if (failed)
+            Volatile.Write(ref _failedExecutions, _failedExecutions + 1);
+    }
+
+    public long GetCompletedExecutions() => Volatile.Read(ref _completedExecutions);
+
+    public long GetFailedExecutions() => Volatile.Read(ref _failedExecutions);
 
     public long GetTotalMetrics()
     {

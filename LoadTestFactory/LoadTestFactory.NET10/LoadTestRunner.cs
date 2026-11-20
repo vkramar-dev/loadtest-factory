@@ -1,4 +1,4 @@
-﻿using LoadTestFactory.Notifications;
+using LoadTestFactory.Notifications;
 using System.Diagnostics;
 
 namespace LoadTestFactory;
@@ -17,8 +17,10 @@ public static class LoadTestRunner
         int durationInSeconds,
         TestScenario[] scenarios,
         string workingDirectory = null,
+        bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
+        LoadTestProgressMonitor progressMonitor = null;
         try
         {
             ValidateParams(parallelAmount, warmupInSeconds, durationInSeconds, scenarios, workingDirectory);
@@ -36,10 +38,6 @@ public static class LoadTestRunner
                 MaxDegreeOfParallelism = parallelAmount,
             };
 
-            Timer notificationTimer = new Timer((notUsed) => {
-                Console.WriteLine("I am TIMER");
-            }, null, 1000, 1000 * 10);
-
             GCCollector = new GCPauseCollector();
             GCCollector.Start();
 
@@ -55,6 +53,10 @@ public static class LoadTestRunner
                 + (long)warmupInSeconds * Stopwatch.Frequency;
             long measurementEndTimestamp = measurementStartTimestamp
                 + (long)durationInSeconds * Stopwatch.Frequency;
+
+            progressMonitor = new LoadTestProgressMonitor(collectors, runStartTimestamp,
+                measurementStartTimestamp, measurementEndTimestamp, consoleOutput);
+            progressMonitor.Start(scenarios.Length);
 
             await Parallel.ForAsync<int>(0, parallelAmount, options, async (i, ct) =>
             {
@@ -82,20 +84,20 @@ public static class LoadTestRunner
                     await scenario.ExecuteMeasuredAsync(currentCollector);
                 }
 
-                Console.WriteLine($"Parallel: #{i}, Count: {currentCollector.GetTotalMetrics()}");
             });
+
+            // Stop timer callbacks before collectors are disposed. Always send one
+            // final event containing the exact counts after all workers finish.
+            await progressMonitor.CompleteAsync();
 
             GCPause[] pauses = GCCollector.GetPauses(
                 clockAnchorUtc,
                 runStartTimestamp,
                 measurementStartTimestamp,
                 measurementEndTimestamp);
-            foreach (GCPause pause in pauses)
-                Console.WriteLine($"Mls: {pause.EndMs - pause.StartMs}");
 
-            Console.WriteLine($"GC counts: {pauses.Length}");
-
-            notificationTimer.Dispose();
+            progressMonitor.WriteGcPauseSummary(pauses.Length);
+            progressMonitor = null;
 
             for (int i = 0; i < parallelAmount; ++i)
                 collectors[i].Dispose();
@@ -106,10 +108,19 @@ public static class LoadTestRunner
         }
         catch(Exception ex)
         {
-            WriteLogFile(workingDirectory, ex);
+            DiagnosticLogger.Write(ex, workingDirectory);
             return null;
         }
+        finally
+        {
+            // Also release the timer if a worker or another component failed.
+            if (progressMonitor != null)
+                await progressMonitor.DisposeAsync();
+        }
     }
+
+    // Event invocation and subscriber isolation belong to LoadTestProgressMonitor.
+    internal static EventHandler<LoadTestProgressEventArgs> GetProgressChangedSubscribers() => ProgressChanged;
 
     private static void ValidateParams(
         int parallelAmount,
@@ -161,37 +172,4 @@ public static class LoadTestRunner
         return workingDirectory;
     }
 
-    private static void WriteLogFile(string workingDirectory, Exception ex)
-    {
-        // An invalid or unwritable workingDirectory must not prevent an error log
-        // from being written to the default diagnostic directory.
-        string fallbackDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LoadTest_Factory");
-
-        foreach (string directory in new[] { workingDirectory, fallbackDirectory })
-        {
-            if (string.IsNullOrWhiteSpace(directory))
-                continue;
-
-            try
-            {
-                Directory.CreateDirectory(directory);
-
-                string filename = $"log_{DateTime.UtcNow:yyyyMMdd_HHmmss_fffffff}_{Guid.NewGuid():N}.txt";
-                string path = Path.Combine(directory, filename);
-                string content = $"Time (UTC): {DateTime.UtcNow:O}{Environment.NewLine}"
-                    + $"Process ID: {Environment.ProcessId}{Environment.NewLine}"
-                    + $"{Environment.NewLine}{ex}";
-
-                File.WriteAllText(path, content);
-                return;
-            }
-            catch (Exception)
-            {
-                // Diagnostics must never hide the original exception.
-                // Try the fallback directory if the requested one failed.
-            }
-        }
-    }
 }

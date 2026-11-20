@@ -38,5 +38,8 @@ internal static class ScenarioExecutor
             collector.AddMeasurement(ref newMeasurement);
         else
             collector.AddMeasurementWithError(ref newMeasurement, error.GetType().Name);
+
+        // Count finished user executions only, not internal Performance Blocking samples.
+        collector.RecordScenarioCompletion(error != null);
     }
 }
