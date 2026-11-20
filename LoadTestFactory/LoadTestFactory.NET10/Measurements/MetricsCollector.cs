@@ -93,6 +93,7 @@ unsafe internal sealed class MetricsCollector : IDisposable
             ++_bufferBlockingCount;
             _bufferBlockingTicks += elapsedTicks;
             _maxBufferBlockingTicks = Math.Max(_maxBufferBlockingTicks, elapsedTicks);
+            Console.WriteLine("Measurement storage bottleneck detected.");
         }
 
         _AllocNewMemory = Task.Factory.StartNew(() =>
