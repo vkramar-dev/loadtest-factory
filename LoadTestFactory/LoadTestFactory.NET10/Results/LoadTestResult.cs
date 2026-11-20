@@ -49,7 +49,13 @@ public sealed class LoadTestResult
     public IReadOnlyList<ScenarioResult> Scenarios { get; init; } = Array.Empty<ScenarioResult>();
 
     /// <summary>Returns a compact human-readable summary suitable for console output.</summary>
-    public override string ToString()
+    public override string ToString() => FormatSummary(includeWarnings: true);
+
+    // The interactive console prints the warning section separately in yellow.
+    // Keep ToString() independent of console colors and redirection settings.
+    internal string ToStringWithoutWarnings() => FormatSummary(includeWarnings: false);
+
+    private string FormatSummary(bool includeWarnings)
     {
         StringBuilder sb = new(2048);
         ExecutionStatistics overall = OverallStatistics ?? new();
@@ -58,17 +64,8 @@ public sealed class LoadTestResult
 
         sb.AppendLine();
         sb.AppendLine(new string('-', 60));
-        sb.AppendLine("LOAD TEST RESULTS");
+        sb.AppendLine("LOAD TEST RESULTS:");
         sb.AppendLine(new string('-', 60));
-        AppendMetric(sb, "Workers:", ParallelAmount.ToString("N0"));
-        AppendMetric(sb, "Scenarios:", (Scenarios?.Count ?? 0).ToString("N0"));
-        AppendMetric(sb, "Warmup:", FormatDuration(WarmupDuration));
-        AppendMetric(sb, "Measurement:", FormatDuration(MeasurementDuration));
-        AppendMetric(sb, "Overall duration:", FormatDuration(ActualOverallDuration));
-        AppendMetric(sb, "Metrics processing:", FormatDuration(MetricsProcessingDuration));
-        AppendMetric(sb, "GC mode:", Environment == null
-            ? "Unknown"
-            : Environment.IsServerGC ? "Server" : "Workstation");
 
         sb.AppendLine();
         sb.AppendLine("OVERALL");
@@ -77,7 +74,7 @@ public sealed class LoadTestResult
         AppendMetric(sb, "Failed:", $"{overall.FailedCount:N0} ({overall.FailureRate:N2}%)");
         AppendMetric(sb, "RPS (mean):", throughput.Mean.ToString("N2"));
         AppendMetric(sb, "RPS (min / peak):", $"{throughput.Min:N2} / {throughput.Peak:N2}");
-        AppendMetric(sb, "Latency mean:", FormatLatency(latency.Mean));
+        AppendMetric(sb, "Latency mean:", FormatMeanLatency(latency));
         AppendMetric(sb, "Latency P50:", FormatLatency(latency.P50));
         AppendMetric(sb, "Latency P90:", FormatLatency(latency.P90));
         AppendMetric(sb, "Latency P95:", FormatLatency(latency.P95));
@@ -90,18 +87,14 @@ public sealed class LoadTestResult
 
         sb.AppendLine();
         sb.AppendLine("SCENARIOS (latency in ms)");
-        int nameWidth = "Scenario".Length;
-        if (Scenarios != null)
-        {
-            foreach (ScenarioResult scenario in Scenarios)
-            {
-                if (scenario != null)
-                    nameWidth = Math.Max(nameWidth, (scenario.Name ?? "").Length);
-            }
-        }
+        string[] headers = ["Scenario", "Weight", "Count", "Failed", "RPS", "Mean", "P95", "P99"];
+        int[] widths = new int[headers.Length];
+        for (int i = 0; i < headers.Length; ++i)
+            widths[i] = headers[i].Length;
 
-        AppendScenarioRow(sb, "Scenario", "Count", "Failed", "RPS", "Mean", "P95", "P99", nameWidth);
-        sb.AppendLine(new string('-', nameWidth + 1 + 12 + 1 + 9 + 1 + 11 + 1 + 10 + 1 + 10 + 1 + 10));
+        // Measure every column before rendering: all numeric columns stay
+        // right-aligned even when the counters contain billions of executions.
+        List<string[]> rows = new(Scenarios?.Count ?? 0);
         if (Scenarios != null)
         {
             foreach (ScenarioResult scenario in Scenarios)
@@ -111,17 +104,31 @@ public sealed class LoadTestResult
 
                 ExecutionStatistics stats = scenario.Statistics ?? new();
                 LatencyStatistics scenarioLatency = stats.Latency ?? new();
-                AppendScenarioRow(sb,
+                string[] row =
+                [
                     scenario.Name ?? "(unnamed)",
+                    scenario.Weight.ToString("N0"),
                     stats.TotalCount.ToString("N0"),
-                    $"{stats.FailedCount:N0}",
+                    stats.FailedCount.ToString("N0"),
                     (stats.Throughput?.Mean ?? 0).ToString("N2"),
-                    FormatLatencyValue(scenarioLatency.Mean),
+                    FormatMeanLatencyValue(scenarioLatency),
                     FormatLatencyValue(scenarioLatency.P95),
-                    FormatLatencyValue(scenarioLatency.P99),
-                    nameWidth);
+                    FormatLatencyValue(scenarioLatency.P99)
+                ];
+                for (int i = 0; i < widths.Length; ++i)
+                    widths[i] = Math.Max(widths[i], row[i].Length);
+
+                rows.Add(row);
             }
         }
+
+        AppendScenarioRow(sb, headers, widths);
+        int tableWidth = widths.Length - 1; // One separating space per pair of columns.
+        foreach (int width in widths)
+            tableWidth += width;
+        sb.AppendLine(new string('-', tableWidth));
+        foreach (string[] row in rows)
+            AppendScenarioRow(sb, row, widths);
 
         bool hasErrors = false;
         if (Scenarios != null)
@@ -144,34 +151,41 @@ public sealed class LoadTestResult
             }
         }
 
-        sb.AppendLine();
-        sb.AppendLine("COMPLETION TAIL (excluded from measurement statistics)");
-        CompletionTailStatistics tail = CompletionTail ?? new();
-        AppendMetric(sb, "Executions:", tail.TotalCount.ToString("N0"));
-        AppendMetric(sb, "Successful:", tail.SuccessCount.ToString("N0"));
-        AppendMetric(sb, "Failed:", $"{tail.FailedCount:N0} ({tail.FailureRate:N2}%)");
-
-        sb.AppendLine();
-        sb.AppendLine("GENERATOR DIAGNOSTICS");
         long gcDurationMs = 0;
         if (GcPauses != null)
         {
             foreach (var pause in GcPauses)
                 gcDurationMs += Math.Max(0, pause.EndMs - pause.StartMs);
         }
-        AppendMetric(sb, "GC pauses:", (GcPauses?.Count ?? 0).ToString("N0"));
-        AppendMetric(sb, "GC pause time:", $"{gcDurationMs:N0} ms");
+        long gcPauseCount = GcPauses?.Count ?? 0;
         EngineDiagnostics engine = Engine ?? new();
-        AppendMetric(sb, "Buffer blockings:", engine.BufferBlockingCount.ToString("N0"));
-        AppendMetric(sb, "Blocking total:", FormatDuration(engine.TotalBufferBlockingTime));
-        AppendMetric(sb, "Blocking max:", FormatDuration(engine.MaxBufferBlockingTime));
+        bool showDiagnostics = gcPauseCount > 0 || gcDurationMs > 0 ||
+            engine.BufferBlockingCount > 0 ||
+            engine.TotalBufferBlockingTime > TimeSpan.Zero ||
+            engine.MaxBufferBlockingTime > TimeSpan.Zero;
 
-        if (Warnings != null && Warnings.Count > 0)
+        if (showDiagnostics)
         {
             sb.AppendLine();
-            sb.AppendLine("WARNINGS");
+            sb.AppendLine("GENERATOR DIAGNOSTICS:");
+            if (gcPauseCount > 0)
+                AppendMetric(sb, "GC pauses:", gcPauseCount.ToString("N0"));
+            if (gcDurationMs > 0)
+                AppendMetric(sb, "GC pause time:", $"{gcDurationMs:N0} ms");
+            if (engine.BufferBlockingCount > 0)
+                AppendMetric(sb, "Storage buffer waits:", engine.BufferBlockingCount.ToString("N0"));
+            if (engine.TotalBufferBlockingTime > TimeSpan.Zero)
+                AppendMetric(sb, "Total wait time:", FormatDuration(engine.TotalBufferBlockingTime));
+            if (engine.MaxBufferBlockingTime > TimeSpan.Zero)
+                AppendMetric(sb, "Longest wait:", FormatDuration(engine.MaxBufferBlockingTime));
+        }
+
+        if (includeWarnings && Warnings != null && Warnings.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("WARNINGS:");
             foreach (LoadTestWarning warning in Warnings)
-                sb.AppendLine($"  [{warning.Code}] {warning.Message}");
+                sb.AppendLine($"  [{warning.DisplayCode}] {warning.Message}");
         }
 
         return sb.ToString().TrimEnd();
@@ -184,24 +198,52 @@ public sealed class LoadTestResult
         sb.Append(label).Append('\t', tabs).AppendLine(value);
     }
 
-    private static void AppendScenarioRow(StringBuilder sb, string name, string count,
-        string failed, string rps, string mean, string p95, string p99, int nameWidth)
+    private static void AppendScenarioRow(StringBuilder sb, string[] columns, int[] widths)
     {
-        sb.Append(name.PadRight(nameWidth)).Append(' ')
-            .Append(count.PadLeft(12)).Append(' ')
-            .Append(failed.PadLeft(9)).Append(' ')
-            .Append(rps.PadLeft(11)).Append(' ')
-            .Append(mean.PadLeft(10)).Append(' ')
-            .Append(p95.PadLeft(10)).Append(' ')
-            .AppendLine(p99.PadLeft(10));
+        for (int i = 0; i < columns.Length; ++i)
+        {
+            if (i > 0)
+                sb.Append(' ');
+
+            // Scenario names are left-aligned, all numerical columns right-aligned.
+            sb.Append(i == 0
+                ? columns[i].PadRight(widths[i])
+                : columns[i].PadLeft(widths[i]));
+        }
+        sb.AppendLine();
     }
 
     private static string FormatDuration(TimeSpan duration) =>
         $"{(long)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}.{duration.Milliseconds:000}";
 
     private static string FormatLatency(TimeSpan? duration) =>
-        duration is TimeSpan value ? $"{value.TotalMilliseconds:N3} ms" : "n/a";
+        duration.HasValue ? $"{FormatLatencyValue(duration)} ms" : "n/a";
 
-    private static string FormatLatencyValue(TimeSpan? duration) =>
-        duration is TimeSpan value ? value.TotalMilliseconds.ToString("N3") : "n/a";
+    private static string FormatMeanLatency(LatencyStatistics latency)
+    {
+        string value = FormatMeanLatencyValue(latency);
+        return value == "n/a" ? value : $"{value} ms";
+    }
+
+    private static string FormatMeanLatencyValue(LatencyStatistics latency) =>
+        latency.MeanNanoseconds is double meanNs
+            ? FormatLatencyMilliseconds(meanNs / 1_000_000.0)
+            : FormatLatencyValue(latency.Mean);
+
+    private static string FormatLatencyValue(TimeSpan? duration)
+    {
+        if (duration is not TimeSpan value)
+            return "n/a";
+
+        return FormatLatencyMilliseconds(value.TotalMilliseconds);
+    }
+
+    private static string FormatLatencyMilliseconds(double milliseconds)
+    {
+        string formatted = milliseconds.ToString("N3");
+        // Preserve exact zero; distinguish positive measurements that round to 0.000 ms.
+        return milliseconds > 0 && formatted == 0d.ToString("N3")
+            ? "< 0.001"
+            : formatted;
+    }
 }

@@ -383,6 +383,7 @@ internal static class MetricsProcessor
             return new LatencyStatistics
             {
                 Mean = ToDuration(_sumLatencyTicks / count),
+                MeanNanoseconds = (_sumLatencyTicks / count) * (1_000_000_000.0 / Stopwatch.Frequency),
                 P50 = ToDuration(_histogram.EstimatePercentile(0.5)),
                 P90 = ToDuration(_histogram.EstimatePercentile(0.90)),
                 P95 = ToDuration(_histogram.EstimatePercentile(0.95)),

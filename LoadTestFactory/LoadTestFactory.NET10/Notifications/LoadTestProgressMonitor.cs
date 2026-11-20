@@ -9,6 +9,7 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
     private readonly long _runStart;
     private readonly long _measurementStart;
     private readonly long _measurementEnd;
+    private readonly int _measurementDurationSeconds;
     private readonly bool _consoleOutput;
     private readonly Timer _timer;
 
@@ -21,12 +22,14 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
         long runStart,
         long measurementStart,
         long measurementEnd,
+        int measurementDurationSeconds,
         bool consoleOutput)
     {
         _collectors = collectors;
         _runStart = runStart;
         _measurementStart = measurementStart;
         _measurementEnd = measurementEnd;
+        _measurementDurationSeconds = measurementDurationSeconds;
         _consoleOutput = consoleOutput;
         _lastMeasurementSample = measurementStart;
 
@@ -86,12 +89,21 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
                 completed += collector.GetCompletedExecutions();
             }
 
-            long intervalTicks = sampledNow - _lastMeasurementSample;
-            if (intervalTicks > 0)
-                rps = (completed - _lastCompleted) * Stopwatch.Frequency / (double)intervalTicks;
+            if (isFinal)
+            {
+                // The final notification reports mean RPS across the configured
+                // measurement window, not the potentially tiny last timer interval.
+                rps = completed / (double)_measurementDurationSeconds;
+            }
+            else
+            {
+                long intervalTicks = sampledNow - _lastMeasurementSample;
+                if (intervalTicks > 0)
+                    rps = (completed - _lastCompleted) * Stopwatch.Frequency / (double)intervalTicks;
 
-            _lastCompleted = completed;
-            _lastMeasurementSample = sampledNow;
+                _lastCompleted = completed;
+                _lastMeasurementSample = sampledNow;
+            }
         }
 
         Notify(new LoadTestProgressEventArgs
@@ -135,36 +147,6 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
             {
                 LogError(new InvalidOperationException("A ProgressChanged event handler failed.", ex));
             }
-        }
-    }
-
-    internal void WriteGcPauseSummary(int count)
-    {
-        if (!_consoleOutput)
-            return;
-
-        try
-        {
-            ConsoleOutput.WriteMetric("GC pauses:", count.ToString("N0"));
-        }
-        catch (Exception ex)
-        {
-            LogError(ex);
-        }
-    }
-
-    internal void WriteWarnings(IEnumerable<LoadTestWarning> warnings)
-    {
-        if (!_consoleOutput)
-            return;
-
-        try
-        {
-            ConsoleOutput.WriteWarnings(warnings);
-        }
-        catch (Exception ex)
-        {
-            LogError(ex);
         }
     }
 

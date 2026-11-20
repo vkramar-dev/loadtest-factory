@@ -75,7 +75,7 @@ public static class LoadTestRunner
                 + (long)durationInSeconds * Stopwatch.Frequency;
 
             progressMonitor = new LoadTestProgressMonitor(collectors, runStartTimestamp,
-                measurementStartTimestamp, measurementEndTimestamp, consoleOutput);
+                measurementStartTimestamp, measurementEndTimestamp, durationInSeconds, consoleOutput);
             progressMonitor.Start();
 
             await Parallel.ForAsync<int>(0, parallelAmount, options, async (i, ct) =>
@@ -108,7 +108,6 @@ public static class LoadTestRunner
 
             GCPause[] pauses = gcCollector.GetPauses(clockAnchorUtc, runStartTimestamp,
                 measurementStartTimestamp, measurementEndTimestamp);
-            progressMonitor.WriteGcPauseSummary(pauses.Length);
 
             long blockingCount = 0;
             long blockingTicks = 0;
@@ -123,13 +122,15 @@ public static class LoadTestRunner
             List<LoadTestWarning> warnings = new(startupWarnings);
             if (blockingCount > 0 && maxBlockingTicks >= Stopwatch.Frequency / 100)
             {
-                warnings.Add(new LoadTestWarning("GENERATOR_BLOCKING",
-                    $"Measurement collectors waited for free buffers {blockingCount:N0} time(s) " +
-                    $"(max {maxBlockingTicks * 1000.0 / Stopwatch.Frequency:N0} ms). " +
-                    "Storage throughput or scheduling may be limiting the load generator."));
-                progressMonitor.WriteWarnings(warnings.Skip(startupWarnings.Length));
+                warnings.Add(new LoadTestWarning("DISK_WRITE_BOTTLENECK",
+                    $"Load generator waited {blockingCount:N0} time(s) for measurement buffers " +
+                    $"(longest wait {maxBlockingTicks * 1000.0 / Stopwatch.Frequency:N0} ms). " +
+                    "Disk write speed or OS scheduling may be limiting the generated load."));
             }
             progressMonitor = null; // CompleteAsync already disposed its timer.
+
+            long storageStartedAt = Stopwatch.GetTimestamp();
+            TryWriteStage(consoleOutput, "Storage", "Finalizing measurement files...");
 
             // Completion is an explicit operation: Dispose only releases resources.
             // Every worker's final partial buffer is persisted before processing.
@@ -141,19 +142,24 @@ public static class LoadTestRunner
             foreach (MetricsCollector collector in collectors)
                 collector.Dispose();
 
+            TryWriteStage(consoleOutput, "Storage",
+                $"Finished in {FormatStageDuration(Stopwatch.GetElapsedTime(storageStartedAt))}");
+
             long metricsStartedAt = Stopwatch.GetTimestamp();
+            TryWriteStage(consoleOutput, "Processing", "Calculating statistics...");
             MetricsProcessingResult processed = await MetricsProcessor.ProcessAsync(
                 collectors, scenarios, measurementStartTimestamp, measurementEndTimestamp,
                 durationInSeconds, cancellationToken);
-            TimeSpan metricsProcessingDuration = TimeSpan.FromSeconds(
-                (Stopwatch.GetTimestamp() - metricsStartedAt) / (double)Stopwatch.Frequency);
+            TimeSpan metricsProcessingDuration = Stopwatch.GetElapsedTime(metricsStartedAt);
+            TryWriteStage(consoleOutput, "Processing",
+                $"Finished in {FormatStageDuration(metricsProcessingDuration)}");
 
             // Close the GC listener before capturing overall duration.
             gcCollector.Dispose();
             gcCollector = null;
             GCCollector = null;
 
-            LoadTestResult result = new LoadTestResult
+            LoadTestResult result = new()
             {
                 ParallelAmount = parallelAmount,
                 WarmupDuration = TimeSpan.FromSeconds(warmupInSeconds),
@@ -177,7 +183,17 @@ public static class LoadTestRunner
             };
 
             if (consoleOutput)
-                Console.WriteLine(result.ToString());
+            {
+                try
+                {
+                    ConsoleOutput.WriteResult(result);
+                }
+                catch (Exception ex)
+                {
+                    // Console failures must never discard an otherwise valid result.
+                    DiagnosticLogger.Write(ex, PathToFolder);
+                }
+            }
 
             return result;
         }
@@ -199,6 +215,26 @@ public static class LoadTestRunner
             GCCollector = null;
         }
     }
+
+    // Stage notifications are informational only; a console failure must never
+    // interrupt the test or prevent returning its calculated results.
+    private static void TryWriteStage(bool consoleOutput, string stage, string message)
+    {
+        if (!consoleOutput)
+            return;
+
+        try
+        {
+            ConsoleOutput.WriteStage(stage, message);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Write(ex, PathToFolder);
+        }
+    }
+
+    private static string FormatStageDuration(TimeSpan duration) =>
+        $"{(long)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}.{duration.Milliseconds:000}";
 
     // Event invocation and subscriber isolation belong to LoadTestProgressMonitor.
     internal static EventHandler<LoadTestProgressEventArgs> GetProgressChangedSubscribers() => ProgressChanged;

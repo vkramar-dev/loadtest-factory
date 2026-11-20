@@ -9,8 +9,15 @@ namespace LoadTestFactory.Results;
 /// <remarks>Scalar latency values are null when no operations completed.</remarks>
 public sealed class LatencyStatistics
 {
-    /// <summary>Gets the arithmetic mean latency.</summary>
+    /// <summary>Gets the arithmetic mean latency rounded to TimeSpan precision (100 ns).</summary>
     public TimeSpan? Mean { get; init; }
+
+    /// <summary>
+    /// Gets the arithmetic mean latency in nanoseconds, retaining fractional
+    /// Stopwatch-tick precision lost when converting the mean to TimeSpan.
+    /// The precision of individual measurements is still limited by Stopwatch.
+    /// </summary>
+    public double? MeanNanoseconds { get; init; }
 
     /// <summary>Gets the 50th percentile (median) latency.</summary>
     public TimeSpan? P50 { get; init; }

@@ -96,7 +96,7 @@ internal static class ConsoleOutput
             {
                 if (colored)
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"WARNING [{warning.Code}]: {warning.Message}");
+                Console.WriteLine($"WARNING [{warning.DisplayCode}]: {warning.Message}");
             }
             finally
             {
@@ -112,7 +112,7 @@ internal static class ConsoleOutput
         {
             LoadTestPhase.Warmup => "Warmup",
             LoadTestPhase.Measurement => "Measurement",
-            _ => "Completed"
+            _ => "Measurement"
         };
 
         string elapsed = FormatElapsed(progress.Elapsed);
@@ -128,8 +128,42 @@ internal static class ConsoleOutput
         line += $" | Executions: {progress.Completed:N0} | Failures: {progress.Failed:N0}";
         if (progress.Phase == LoadTestPhase.Measurement)
             line += $" | RPS: {progress.Rps:N0}";
+        else if (progress.Phase == LoadTestPhase.Completed)
+            line += $" | RPS (avg): {progress.Rps:N0}";
 
         Console.WriteLine(line);
+    }
+
+    // Post-measurement stages have no known duration or completion percentage.
+    internal static void WriteStage(string phase, string message) =>
+        Console.WriteLine($"[{phase,-11}] {message}");
+
+    // Render warnings separately so their color does not depend on detecting
+    // a header inside a formatted string (or on CRLF vs LF line endings).
+    // ToString() itself remains plain text for logging and other consumers.
+    internal static void WriteResult(LoadTestResult result)
+    {
+        if (result.Warnings == null || result.Warnings.Count == 0 || Console.IsOutputRedirected)
+        {
+            Console.WriteLine(result);
+            return;
+        }
+
+        Console.WriteLine(result.ToStringWithoutWarnings());
+        Console.WriteLine();
+
+        ConsoleColor previousColor = Console.ForegroundColor;
+        try
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("WARNINGS");
+            foreach (LoadTestWarning warning in result.Warnings)
+                Console.WriteLine($"  [{warning.DisplayCode}] {warning.Message}");
+        }
+        finally
+        {
+            Console.ForegroundColor = previousColor;
+        }
     }
 
     private static string FormatAvailable(long? free, long? total = null)
