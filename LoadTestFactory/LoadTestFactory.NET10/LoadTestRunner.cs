@@ -1,5 +1,6 @@
-using LoadTestFactory.Notifications;
 using LoadTestFactory.Metrics;
+using LoadTestFactory.Notifications;
+using LoadTestFactory.Reports;
 using System.Diagnostics;
 
 namespace LoadTestFactory;
@@ -193,6 +194,15 @@ public static class LoadTestRunner
                     // Console failures must never discard an otherwise valid result.
                     DiagnosticLogger.Write(ex, PathToFolder);
                 }
+            }
+
+            if (result != null)
+            {
+                string reportFileName = Path.Combine(
+                    PathToFolder,
+                    $"loadtest_report_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}_UTC.html");
+
+                HtmlReportGenerator.Save(result, reportFileName);
             }
 
             return result;

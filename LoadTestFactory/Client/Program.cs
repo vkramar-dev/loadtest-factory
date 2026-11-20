@@ -29,7 +29,7 @@ TestScenario[] tests = new TestScenario[]
     CreateScenario("O", 1)
 };
 
-LoadTestResult result = await LoadTestRunner.RunAsync(4, 30, 30, tests, null, true);
+LoadTestResult result = await LoadTestRunner.RunAsync(16, 10, 20, tests, null, true);
 
 
 static TestScenario CreateScenario(string name, int weight)
