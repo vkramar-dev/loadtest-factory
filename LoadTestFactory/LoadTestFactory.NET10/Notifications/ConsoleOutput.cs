@@ -194,20 +194,22 @@ internal static class ConsoleOutput
         }
     }
 
-    // Render warnings separately so their color does not depend on detecting
-    // a header inside a formatted string (or on CRLF vs LF line endings).
-    // ToString() itself remains plain text for logging and other consumers.
+    // Color is a console concern: ToString() remains plain text for logging,
+    // redirected output, and other consumers.
     internal static void WriteResult(LoadTestResult result)
     {
-        if (result.Warnings == null || result.Warnings.Count == 0 || Console.IsOutputRedirected)
+        if (Console.IsOutputRedirected)
         {
             Console.WriteLine(result);
             return;
         }
 
-        Console.WriteLine(result.ToStringWithoutWarnings());
-        Console.WriteLine();
+        WriteSummaryWithHighlights(result.ToStringWithoutWarnings());
 
+        if (result.Warnings == null || result.Warnings.Count == 0)
+            return;
+
+        Console.WriteLine();
         ConsoleColor previousColor = Console.ForegroundColor;
         try
         {
@@ -219,6 +221,65 @@ internal static class ConsoleOutput
         finally
         {
             Console.ForegroundColor = previousColor;
+        }
+    }
+
+    private static readonly string[] HighlightedMetrics =
+    [
+        "Executions:",
+        "RPS (mean):",
+        "Latency P99:"
+    ];
+
+    private static void WriteSummaryWithHighlights(string summary)
+    {
+        using StringReader reader = new(summary);
+        bool inOverall = false;
+        string line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (line == "OVERALL" || line == "OVERALL:")
+                inOverall = true;
+            else if (line.StartsWith("SCENARIOS", StringComparison.Ordinal))
+                inOverall = false;
+
+            int valueStart = -1;
+            if (inOverall)
+            {
+                foreach (string label in HighlightedMetrics)
+                {
+                    if (!line.StartsWith(label, StringComparison.Ordinal) ||
+                        line.Length <= label.Length || !char.IsWhiteSpace(line[label.Length]))
+                        continue;
+
+                    valueStart = label.Length;
+                    while (valueStart < line.Length && char.IsWhiteSpace(line[valueStart]))
+                        ++valueStart;
+
+                    if (valueStart == line.Length)
+                        valueStart = -1;
+                    break;
+                }
+            }
+
+            if (valueStart < 0)
+            {
+                Console.WriteLine(line);
+                continue;
+            }
+
+            Console.Write(line[..valueStart]); // Label and alignment retain normal color.
+            ConsoleColor previousColor = Console.ForegroundColor;
+            try
+            {
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write(line[valueStart..]);
+            }
+            finally
+            {
+                Console.ForegroundColor = previousColor;
+            }
+            Console.WriteLine();
         }
     }
 
