@@ -130,30 +130,41 @@ public static class LoadTestRunner
             }
             progressMonitor = null; // CompleteAsync already disposed its timer.
 
-            long storageStartedAt = Stopwatch.GetTimestamp();
-            TryWriteStage(consoleOutput, "Storage", "Finalizing measurement files...");
+            ConsoleStageProgress storageProgress = TryStartStage(consoleOutput, "Storage");
+            try
+            {
+                // Completion is an explicit operation: Dispose only releases resources.
+                // Every worker's final partial buffer is persisted before processing.
+                foreach (MetricsCollector collector in collectors)
+                    collector.Complete();
 
-            // Completion is an explicit operation: Dispose only releases resources.
-            // Every worker's final partial buffer is persisted before processing.
-            foreach (MetricsCollector collector in collectors)
-                collector.Complete();
-
-            // Release all collection buffers before allocating processing histograms.
-            // The collector metadata (segment files and error codes) remains readable.
-            foreach (MetricsCollector collector in collectors)
-                collector.Dispose();
-
-            TryWriteStage(consoleOutput, "Storage",
-                $"Finished in {FormatStageDuration(Stopwatch.GetElapsedTime(storageStartedAt))}");
+                // Release all collection buffers before allocating processing histograms.
+                // The collector metadata (segment files and error codes) remains readable.
+                foreach (MetricsCollector collector in collectors)
+                    collector.Dispose();
+            }
+            finally
+            {
+                if (storageProgress != null)
+                    await TryFinishStageAsync(storageProgress);
+            }
 
             long metricsStartedAt = Stopwatch.GetTimestamp();
-            TryWriteStage(consoleOutput, "Processing", "Calculating statistics...");
-            MetricsProcessingResult processed = await MetricsProcessor.ProcessAsync(
-                collectors, scenarios, measurementStartTimestamp, measurementEndTimestamp,
-                durationInSeconds, cancellationToken);
-            TimeSpan metricsProcessingDuration = Stopwatch.GetElapsedTime(metricsStartedAt);
-            TryWriteStage(consoleOutput, "Processing",
-                $"Finished in {FormatStageDuration(metricsProcessingDuration)}");
+            ConsoleStageProgress processingProgress = TryStartStage(consoleOutput, "Processing");
+            MetricsProcessingResult processed;
+            TimeSpan metricsProcessingDuration;
+            try
+            {
+                processed = await MetricsProcessor.ProcessAsync(
+                    collectors, scenarios, measurementStartTimestamp, measurementEndTimestamp,
+                    durationInSeconds, cancellationToken);
+                metricsProcessingDuration = Stopwatch.GetElapsedTime(metricsStartedAt);
+            }
+            finally
+            {
+                if (processingProgress != null)
+                    await TryFinishStageAsync(processingProgress);
+            }
 
             // Close the GC listener before capturing overall duration.
             gcCollector.Dispose();
@@ -216,6 +227,17 @@ public static class LoadTestRunner
         {
             if (progressMonitor != null)
                 await progressMonitor.DisposeAsync();
+            if (consoleOutput)
+            {
+                try
+                {
+                    ConsoleOutput.EndProgressLine();
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLogger.Write(ex, PathToFolder);
+                }
+            }
             if (collectors != null)
             {
                 foreach (MetricsCollector collector in collectors)
@@ -226,25 +248,35 @@ public static class LoadTestRunner
         }
     }
 
-    // Stage notifications are informational only; a console failure must never
-    // interrupt the test or prevent returning its calculated results.
-    private static void TryWriteStage(bool consoleOutput, string stage, string message)
+    // Console progress is informational only: a console failure must never
+    // interrupt the test or prevent returning calculated results.
+    private static ConsoleStageProgress TryStartStage(bool consoleOutput, string stage)
     {
         if (!consoleOutput)
-            return;
+            return null;
 
         try
         {
-            ConsoleOutput.WriteStage(stage, message);
+            return new ConsoleStageProgress(stage);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Write(ex, PathToFolder);
+            return null;
+        }
+    }
+
+    private static async ValueTask TryFinishStageAsync(ConsoleStageProgress progress)
+    {
+        try
+        {
+            await progress.CompleteAsync();
         }
         catch (Exception ex)
         {
             DiagnosticLogger.Write(ex, PathToFolder);
         }
     }
-
-    private static string FormatStageDuration(TimeSpan duration) =>
-        $"{(long)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}.{duration.Milliseconds:000}";
 
     // Event invocation and subscriber isolation belong to LoadTestProgressMonitor.
     internal static EventHandler<LoadTestProgressEventArgs> GetProgressChangedSubscribers() => ProgressChanged;

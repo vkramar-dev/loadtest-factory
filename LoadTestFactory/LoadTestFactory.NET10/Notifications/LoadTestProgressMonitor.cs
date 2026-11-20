@@ -16,6 +16,7 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
     private long _lastMeasurementSample;
     private long _lastCompleted;
     private int _notifying;
+    private bool _warmupCompletionPublished;
 
     internal LoadTestProgressMonitor(
         MetricsCollector[] collectors,
@@ -39,7 +40,9 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
 
     internal void Start()
     {
-        _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        // Schedule the initial notification asynchronously, so a slow event
+        // subscriber cannot delay the start of load-generating workers.
+        _timer.Change(TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
     private void TimerCallback(object state)
@@ -65,6 +68,23 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
     private void Publish(bool isFinal)
     {
         long now = Stopwatch.GetTimestamp();
+
+        // Make sure Warmup finishes at 100% on its own line, even if a timer
+        // tick lands just after the boundary or a callback was delayed.
+        if (!_warmupCompletionPublished && _measurementStart > _runStart &&
+            (isFinal || now >= _measurementStart))
+        {
+            _warmupCompletionPublished = true;
+            TimeSpan warmupDuration = Stopwatch.GetElapsedTime(_runStart, _measurementStart);
+            Notify(new LoadTestProgressEventArgs
+            {
+                Phase = LoadTestPhase.Warmup,
+                Elapsed = warmupDuration,
+                Duration = warmupDuration,
+                Percentage = 100
+            });
+        }
+
         bool warmup = !isFinal && now < _measurementStart;
         LoadTestPhase phase = isFinal ? LoadTestPhase.Completed
             : warmup ? LoadTestPhase.Warmup

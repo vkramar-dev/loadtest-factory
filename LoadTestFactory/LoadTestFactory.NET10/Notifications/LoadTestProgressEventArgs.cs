@@ -18,6 +18,6 @@ public sealed class LoadTestProgressEventArgs : EventArgs
     public long Completed { get; init; }
     public long Failed { get; init; }
 
-    // RPS for the interval since the previous measurement notification.
+    // Interval RPS during measurement; configured-duration average on completion.
     public double Rps { get; init; }
 }

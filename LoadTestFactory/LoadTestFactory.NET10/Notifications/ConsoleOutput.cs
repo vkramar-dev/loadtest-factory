@@ -4,6 +4,10 @@ namespace LoadTestFactory.Notifications;
 
 internal static class ConsoleOutput
 {
+    private static readonly object ProgressWriteLock = new();
+    private static bool _progressLineOpen;
+    private static int _progressLineWidth;
+
     private static readonly string[] Banner =
     [
         "#       ###    ###   ####          #####  #####   ####  #####",
@@ -119,24 +123,76 @@ internal static class ConsoleOutput
         string duration = FormatElapsed(progress.Duration);
         string line = $"[{phase,-11}] {elapsed} / {duration} ({progress.Percentage,5:F1}%)";
 
-        if (progress.Phase == LoadTestPhase.Warmup)
+        if (progress.Phase != LoadTestPhase.Warmup)
         {
-            Console.WriteLine(line);
-            return;
+            line += $" | Executions: {progress.Completed:N0} | Failures: {progress.Failed:N0}";
+            line += progress.Phase == LoadTestPhase.Completed
+                ? $" | RPS (avg): {progress.Rps:N0}"
+                : $" | RPS: {progress.Rps:N0}";
         }
 
-        line += $" | Executions: {progress.Completed:N0} | Failures: {progress.Failed:N0}";
-        if (progress.Phase == LoadTestPhase.Measurement)
-            line += $" | RPS: {progress.Rps:N0}";
-        else if (progress.Phase == LoadTestPhase.Completed)
-            line += $" | RPS (avg): {progress.Rps:N0}";
-
-        Console.WriteLine(line);
+        // A completed phase occupies one fixed line, regardless of its duration.
+        bool finished = progress.Phase == LoadTestPhase.Completed ||
+                        (progress.Phase == LoadTestPhase.Warmup && progress.Percentage >= 100);
+        WriteProgressLine(line, finished);
     }
 
-    // Post-measurement stages have no known duration or completion percentage.
-    internal static void WriteStage(string phase, string message) =>
-        Console.WriteLine($"[{phase,-11}] {message}");
+    internal static void WriteStageProgress(string phase, TimeSpan elapsed, bool finished)
+    {
+        string time = finished
+            ? $"{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}.{elapsed.Milliseconds:000}"
+            : FormatElapsed(elapsed);
+        WriteProgressLine($"[{phase,-11}] {time}", finished);
+    }
+
+    // Only one terminal line is used for each phase. During a phase we repaint
+    // that line, and once finished we terminate it with a newline. Redirected
+    // output gets only the final line, without carriage returns or ANSI codes.
+    private static void WriteProgressLine(string line, bool finished)
+    {
+        lock (ProgressWriteLock)
+        {
+            if (Console.IsOutputRedirected)
+            {
+                if (finished)
+                    Console.WriteLine(line);
+                return;
+            }
+
+            if (_progressLineOpen)
+                Console.Write('\r');
+
+            Console.Write(line);
+            if (_progressLineOpen && _progressLineWidth > line.Length)
+                Console.Write(new string(' ', _progressLineWidth - line.Length));
+
+            if (finished)
+            {
+                Console.WriteLine();
+                _progressLineOpen = false;
+                _progressLineWidth = 0;
+            }
+            else
+            {
+                _progressLineWidth = Math.Max(_progressLineWidth, line.Length);
+                _progressLineOpen = true;
+                Console.Out.Flush();
+            }
+        }
+    }
+
+    // Also close a partially written line if a test is aborted unexpectedly.
+    internal static void EndProgressLine()
+    {
+        lock (ProgressWriteLock)
+        {
+            if (_progressLineOpen && !Console.IsOutputRedirected)
+                Console.WriteLine();
+
+            _progressLineOpen = false;
+            _progressLineWidth = 0;
+        }
+    }
 
     // Render warnings separately so their color does not depend on detecting
     // a header inside a formatted string (or on CRLF vs LF line endings).

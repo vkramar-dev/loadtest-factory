@@ -68,7 +68,7 @@ public sealed class LoadTestResult
         sb.AppendLine(new string('-', 60));
 
         sb.AppendLine();
-        sb.AppendLine("OVERALL");
+        sb.AppendLine("OVERALL:");
         AppendMetric(sb, "Executions:", overall.TotalCount.ToString("N0"));
         AppendMetric(sb, "Successful:", overall.SuccessCount.ToString("N0"));
         AppendMetric(sb, "Failed:", $"{overall.FailedCount:N0} ({overall.FailureRate:N2}%)");
