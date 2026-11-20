@@ -6,7 +6,7 @@ namespace LoadTestFactory.Results;
 /// <summary>
 /// Represents the latency distribution of completed operations, including failures.
 /// </summary>
-/// <remarks>Cancelled operations are excluded. Scalar latency values are null when no operations completed.</remarks>
+/// <remarks>Scalar latency values are null when no operations completed.</remarks>
 public sealed class LatencyStatistics
 {
     /// <summary>Gets the arithmetic mean latency.</summary>

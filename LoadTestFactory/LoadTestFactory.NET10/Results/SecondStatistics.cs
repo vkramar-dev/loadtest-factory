@@ -17,6 +17,9 @@ public sealed class SecondStatistics
     /// <summary>Gets the total number of completed operations during this second.</summary>
     public long TotalCount => SuccessCount + FailedCount;
 
+    /// <summary>Gets the total summed latency of completed operations, for re-bucketing without averaging averages.</summary>
+    public TimeSpan TotalLatency { get; init; }
+
     /// <summary>Gets the mean latency of completed operations, or null if none completed.</summary>
     public TimeSpan? MeanLatency { get; init; }
 

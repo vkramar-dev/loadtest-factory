@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace LoadTestFactory.Utilities;
 
@@ -24,13 +24,15 @@ internal static class ScenarioExecutor
 
     internal static async Task ExecuteMeasuredAsync(
         this TestScenario scenario,
-        MetricsCollector collector)
+        MetricsCollector collector,
+        long measurementEndTimestamp)
     {
         long start = Stopwatch.GetTimestamp();
 
         Exception error = await scenario.ExecuteSafeAsync();
 
-        long elapsedTicks = Stopwatch.GetTimestamp() - start;
+        long completionTimestamp = Stopwatch.GetTimestamp();
+        long elapsedTicks = completionTimestamp - start;
 
         Measurement newMeasurement = new(scenario.Id, start, elapsedTicks);
 
@@ -40,6 +42,6 @@ internal static class ScenarioExecutor
             collector.AddMeasurementWithError(ref newMeasurement, error.GetType().Name);
 
         // Count finished user executions only, not internal Performance Blocking samples.
-        collector.RecordScenarioCompletion(error != null);
+        collector.RecordScenarioCompletion(error != null, completionTimestamp < measurementEndTimestamp);
     }
 }

@@ -1,4 +1,5 @@
 using LoadTestFactory.Notifications;
+using LoadTestFactory.Metrics;
 using System.Diagnostics;
 
 namespace LoadTestFactory;
@@ -20,20 +21,21 @@ public static class LoadTestRunner
         bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
+        long overallStartedAt = Stopwatch.GetTimestamp();
         LoadTestProgressMonitor progressMonitor = null;
+        MetricsCollector[] collectors = null;
+        GCPauseCollector gcCollector = null;
+
         try
         {
             ValidateParams(parallelAmount, warmupInSeconds, durationInSeconds, scenarios, workingDirectory);
 
             PathToFolder = GetPathToFolder(workingDirectory);
 
-            // Collect the load generator's environment before reserving measurement memory.
             TestEnvironment testEnvironment = TestEnvironmentCollector.Capture(PathToFolder);
             LoadTestWarning[] startupWarnings = TestEnvironmentCollector.GetStartupWarnings(
                 testEnvironment, checked(MetricsCollector.InitialBufferBytes * parallelAmount));
 
-            // Print resource warnings BEFORE allocating unmanaged buffers. A low-memory
-            // configuration must be visible even if the allocations subsequently fail.
             if (consoleOutput)
             {
                 try
@@ -47,23 +49,21 @@ public static class LoadTestRunner
                 }
             }
 
-            MetricsCollector[] collectors = new MetricsCollector[parallelAmount];
+            collectors = new MetricsCollector[parallelAmount];
             for (int i = 0; i < parallelAmount; ++i)
                 collectors[i] = new MetricsCollector(i);
 
             FullyFragmentedTestScenarioCircle scenariosCircle = new(scenarios);
-
             ParallelOptions options = new()
             {
                 MaxDegreeOfParallelism = parallelAmount,
             };
 
-            GCCollector = new GCPauseCollector();
-            GCCollector.Start();
+            gcCollector = new GCPauseCollector();
+            GCCollector = gcCollector;
+            gcCollector.Start();
 
-            // Keep one high-resolution time axis for all workers and metrics.
-            // EventWrittenEventArgs.TimeStamp uses UTC, so capture a clock
-            // calibration once and convert GC event times onto this axis.
+            // One calibrated Stopwatch time axis for workers, GC and report buckets.
             long beforeUtc = Stopwatch.GetTimestamp();
             DateTime clockAnchorUtc = DateTime.UtcNow;
             long afterUtc = Stopwatch.GetTimestamp();
@@ -82,7 +82,6 @@ public static class LoadTestRunner
             {
                 var iterator = scenariosCircle.GetIterator();
 
-                // Warm-up
                 while (!ct.IsCancellationRequested)
                 {
                     if (Stopwatch.GetTimestamp() >= measurementStartTimestamp)
@@ -93,31 +92,22 @@ public static class LoadTestRunner
                 }
 
                 MetricsCollector currentCollector = collectors[i];
-
-                // Measurement
                 while (true)
                 {
                     if (Stopwatch.GetTimestamp() >= measurementEndTimestamp)
                         break;
 
                     TestScenario scenario = iterator.Next();
-                    await scenario.ExecuteMeasuredAsync(currentCollector);
+                    await scenario.ExecuteMeasuredAsync(currentCollector, measurementEndTimestamp);
                 }
-
             });
 
-            long actualMeasurementEndTimestamp = Stopwatch.GetTimestamp();
-
-            // Stop timer callbacks before collectors are disposed. Always send one
-            // final event containing the exact counts after all workers finish.
+            // Workers are finished. A completion after the configured measurement
+            // end is stored in CompletionTail, not the normal statistics.
             await progressMonitor.CompleteAsync();
 
-            GCPause[] pauses = GCCollector.GetPauses(
-                clockAnchorUtc,
-                runStartTimestamp,
-                measurementStartTimestamp,
-                measurementEndTimestamp);
-
+            GCPause[] pauses = gcCollector.GetPauses(clockAnchorUtc, runStartTimestamp,
+                measurementStartTimestamp, measurementEndTimestamp);
             progressMonitor.WriteGcPauseSummary(pauses.Length);
 
             long blockingCount = 0;
@@ -139,20 +129,38 @@ public static class LoadTestRunner
                     "Storage throughput or scheduling may be limiting the load generator."));
                 progressMonitor.WriteWarnings(warnings.Skip(startupWarnings.Length));
             }
-            progressMonitor = null;
+            progressMonitor = null; // CompleteAsync already disposed its timer.
 
-            for (int i = 0; i < parallelAmount; ++i)
-                collectors[i].Dispose();
+            // Completion is an explicit operation: Dispose only releases resources.
+            // Every worker's final partial buffer is persisted before processing.
+            foreach (MetricsCollector collector in collectors)
+                collector.Complete();
 
-            GCCollector.Dispose();
+            // Release all collection buffers before allocating processing histograms.
+            // The collector metadata (segment files and error codes) remains readable.
+            foreach (MetricsCollector collector in collectors)
+                collector.Dispose();
 
-            return new LoadTestResult
+            long metricsStartedAt = Stopwatch.GetTimestamp();
+            MetricsProcessingResult processed = await MetricsProcessor.ProcessAsync(
+                collectors, scenarios, measurementStartTimestamp, measurementEndTimestamp,
+                durationInSeconds, cancellationToken);
+            TimeSpan metricsProcessingDuration = TimeSpan.FromSeconds(
+                (Stopwatch.GetTimestamp() - metricsStartedAt) / (double)Stopwatch.Frequency);
+
+            // Close the GC listener before capturing overall duration.
+            gcCollector.Dispose();
+            gcCollector = null;
+            GCCollector = null;
+
+            LoadTestResult result = new LoadTestResult
             {
                 ParallelAmount = parallelAmount,
                 WarmupDuration = TimeSpan.FromSeconds(warmupInSeconds),
                 MeasurementDuration = TimeSpan.FromSeconds(durationInSeconds),
-                ActualMeasurementDuration = TimeSpan.FromSeconds(
-                    (actualMeasurementEndTimestamp - measurementStartTimestamp) / (double)Stopwatch.Frequency),
+                ActualOverallDuration = TimeSpan.FromSeconds(
+                    (Stopwatch.GetTimestamp() - overallStartedAt) / (double)Stopwatch.Frequency),
+                MetricsProcessingDuration = metricsProcessingDuration,
                 MeasurementStartedAtUtc = new DateTimeOffset(clockAnchorUtc.AddSeconds(warmupInSeconds)),
                 Environment = testEnvironment,
                 Warnings = warnings,
@@ -162,19 +170,33 @@ public static class LoadTestRunner
                     TotalBufferBlockingTime = TimeSpan.FromSeconds(blockingTicks / (double)Stopwatch.Frequency),
                     MaxBufferBlockingTime = TimeSpan.FromSeconds(maxBlockingTicks / (double)Stopwatch.Frequency)
                 },
-                GcPauses = pauses
+                GcPauses = pauses,
+                OverallStatistics = processed.Overall,
+                CompletionTail = processed.CompletionTail,
+                Scenarios = processed.Scenarios
             };
+
+            if (consoleOutput)
+                Console.WriteLine(result.ToString());
+
+            return result;
         }
-        catch(Exception ex)
+        catch (Exception ex)
         {
-            DiagnosticLogger.Write(ex, workingDirectory);
+            DiagnosticLogger.Write(ex, PathToFolder ?? workingDirectory);
             return null;
         }
         finally
         {
-            // Also release the timer if a worker or another component failed.
             if (progressMonitor != null)
                 await progressMonitor.DisposeAsync();
+            if (collectors != null)
+            {
+                foreach (MetricsCollector collector in collectors)
+                    collector?.Dispose();
+            }
+            gcCollector?.Dispose();
+            GCCollector = null;
         }
     }
 

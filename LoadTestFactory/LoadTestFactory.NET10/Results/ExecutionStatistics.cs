@@ -15,11 +15,8 @@ public sealed class ExecutionStatistics
     /// <summary>Gets the number of failed operations.</summary>
     public long FailedCount { get; init; }
 
-    /// <summary>Gets the number of operations cancelled by the test or the caller.</summary>
-    public long CancelledCount { get; init; }
-
     /// <summary>Gets the percentage of completed operations that failed, from 0 to 100.</summary>
-    /// <remarks>Cancelled operations are excluded. The value is zero when no operations completed.</remarks>
+    /// <remarks>The value is zero when no operations completed.</remarks>
     public double FailureRate { get; init; }
 
     /// <summary>Gets the throughput statistics.</summary>

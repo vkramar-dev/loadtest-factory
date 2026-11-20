@@ -24,6 +24,9 @@ unsafe internal sealed class MetricsCollector : IDisposable
     private long _maxBufferBlockingTicks;
     readonly int _collectorNumber;
     private Task _AllocNewMemory = Task.CompletedTask;
+    private bool _completed;
+    private long _completedMeasurementCount;
+    private int _disposed;
 
     public MetricsCollector(int collectorNumber)
     {
@@ -40,6 +43,8 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
     public void AddMeasurement(ref Measurement measurement)
     {
+        if (_completed)
+            throw new InvalidOperationException("Cannot add measurements after collector completion.");
         if (_index == Capacity)
         {
             HandleMemoryDepleting();
@@ -93,7 +98,6 @@ unsafe internal sealed class MetricsCollector : IDisposable
             ++_bufferBlockingCount;
             _bufferBlockingTicks += elapsedTicks;
             _maxBufferBlockingTicks = Math.Max(_maxBufferBlockingTicks, elapsedTicks);
-            Console.WriteLine("Measurement storage bottleneck detected.");
         }
 
         _AllocNewMemory = Task.Factory.StartNew(() =>
@@ -105,12 +109,17 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
             ReadOnlySpan<byte> bytes = new(oldAddress, checked(Capacity * sizeof(Measurement)));
 
-            using var handle = File.OpenHandle(
-                backupFileName, FileMode.Create, FileAccess.Write, FileShare.None);
-
-            RandomAccess.Write(handle, bytes, 0);
-
-            NativeMemory.Free(oldAddress);
+            try
+            {
+                using var handle = File.OpenHandle(
+                    backupFileName, FileMode.Create, FileAccess.Write, FileShare.None);
+                RandomAccess.Write(handle, bytes, 0);
+            }
+            finally
+            {
+                // The old unmanaged buffer must be released even if disk I/O fails.
+                NativeMemory.Free(oldAddress);
+            }
 
             _measurements_reserved = (Measurement*)NativeMemory.AllocZeroed(
                                                                     (nuint)Capacity,
@@ -121,8 +130,11 @@ unsafe internal sealed class MetricsCollector : IDisposable
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
 
-    public void RecordScenarioCompletion(bool failed)
+    public void RecordScenarioCompletion(bool failed, bool withinMeasurementWindow)
     {
+        if (!withinMeasurementWindow)
+            return;
+
         Volatile.Write(ref _completedExecutions, _completedExecutions + 1);
 
         if (failed)
@@ -141,18 +153,67 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
     public long GetTotalMetrics()
     {
-        return _index + Capacity * _MeasurementSegmentCounter;
+        return _completed
+            ? _completedMeasurementCount
+            : _index + (long)Capacity * _MeasurementSegmentCounter;
+    }
+
+    // Explicit business operation: preserve the last partially-filled buffer.
+    // Called after all workers stop, and before MetricsProcessor / Dispose.
+    internal void Complete()
+    {
+        if (_completed)
+            return;
+
+        // Previous full segment must be fully written before the final segment
+        // becomes visible to the processing stage.
+        _AllocNewMemory.GetAwaiter().GetResult();
+
+        _completedMeasurementCount = (long)Capacity * _MeasurementSegmentCounter + _index;
+
+        if (_index > 0)
+        {
+            string fileName = Path.Combine(LoadTestRunner.PathToFolder,
+                $"load_test_{_collectorNumber}_{_MeasurementSegmentCounter}.bin");
+
+            using (var handle = File.OpenHandle(
+                fileName, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                ReadOnlySpan<byte> bytes = new(_measurements,
+                    checked(_index * sizeof(Measurement)));
+                RandomAccess.Write(handle, bytes, 0);
+            }
+
+            ++_MeasurementSegmentCounter;
+            _index = 0;
+        }
+
+        _completed = true;
+    }
+
+    internal string[] GetCompletedSegmentFiles()
+    {
+        if (!_completed)
+            throw new InvalidOperationException("Complete the collector before reading segments.");
+
+        string[] files = new string[_MeasurementSegmentCounter];
+        for (int i = 0; i < files.Length; ++i)
+            files[i] = Path.Combine(LoadTestRunner.PathToFolder,
+                $"load_test_{_collectorNumber}_{i}.bin");
+        return files;
     }
 
     public void Dispose()
     {
-        Destructor();
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            Destructor();
         GC.SuppressFinalize(this);
     }
 
     ~MetricsCollector()
     {
-        Destructor();
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            Destructor();
     }
 
     private void Destructor()
@@ -173,6 +234,8 @@ unsafe internal sealed class MetricsCollector : IDisposable
             _measurements_reserved = null;
         }
 
-        _AllocNewMemory.Dispose();
+        // Task.CompletedTask may be shared by the runtime; do not dispose it.
+        if (!ReferenceEquals(_AllocNewMemory, Task.CompletedTask))
+            _AllocNewMemory.Dispose();
     }
 }

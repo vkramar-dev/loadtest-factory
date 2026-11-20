@@ -11,4 +11,7 @@ public sealed class ScenarioResult
 
     /// <summary>Gets the execution statistics for the scenario.</summary>
     public ExecutionStatistics Statistics { get; init; } = new();
+
+    /// <summary>Gets operations that started during measurement but completed after its end.</summary>
+    public CompletionTailStatistics CompletionTail { get; init; } = new();
 }
