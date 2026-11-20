@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace LoadTestFactory.Measurements;
@@ -7,7 +7,8 @@ unsafe internal sealed class MetricsCollector : IDisposable
 {
     public List<string> ResultTypes = new List<string>(["Success"]);
 
-    const int Capacity = 1_000_000;
+    internal const int Capacity = 1_000_000;
+    internal static long InitialBufferBytes => 2L * Capacity * sizeof(Measurement);
     Measurement* _measurements = null;
     Measurement* _measurements_reserved = null;
     volatile int _MeasurementSegmentCounter = 0;
@@ -18,6 +19,9 @@ unsafe internal sealed class MetricsCollector : IDisposable
     // after asynchronous disk serialization.
     private long _completedExecutions;
     private long _failedExecutions;
+    private long _bufferBlockingCount;
+    private long _bufferBlockingTicks;
+    private long _maxBufferBlockingTicks;
     readonly int _collectorNumber;
     private Task _AllocNewMemory = Task.CompletedTask;
 
@@ -69,13 +73,14 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
     private void HandleMemoryDepleting()
     {
-        long startAt = 0; // TODO: comment
+        // Measure only waits for a background spill that has not finished yet.
+        long startAt = 0;
         if (!_AllocNewMemory.IsCompleted)
             startAt = Stopwatch.GetTimestamp();
 
         _AllocNewMemory.Wait();
 
-        // TODO: comment
+        // Switch immediately to the prepared spare buffer.
         Measurement* oldAddress = _measurements;
         _measurements = _measurements_reserved;
         _measurements_reserved = null;
@@ -83,10 +88,11 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
         if (startAt != 0)
         {
-            // TODO: comment
-            Measurement blockingMeasurement = new(0, startAt, Stopwatch.GetTimestamp() - startAt);
-            AddMeasurementWithError(ref blockingMeasurement, "Performance Blocking");
-            Console.WriteLine($"BLOCKING !!!, ElapsedTicks: {blockingMeasurement.ElapsedTicks}");
+            // An engine-side wait is not a scenario failure or latency sample.
+            long elapsedTicks = Stopwatch.GetTimestamp() - startAt;
+            ++_bufferBlockingCount;
+            _bufferBlockingTicks += elapsedTicks;
+            _maxBufferBlockingTicks = Math.Max(_maxBufferBlockingTicks, elapsedTicks);
         }
 
         _AllocNewMemory = Task.Factory.StartNew(() =>
@@ -126,6 +132,12 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
     public long GetFailedExecutions() => Volatile.Read(ref _failedExecutions);
 
+    // Read after workers have completed; these values describe the generator,
+    // not failed executions of the test scenarios.
+    internal long BufferBlockingCount => _bufferBlockingCount;
+    internal long BufferBlockingTicks => _bufferBlockingTicks;
+    internal long MaxBufferBlockingTicks => _maxBufferBlockingTicks;
+
     public long GetTotalMetrics()
     {
         return _index + Capacity * _MeasurementSegmentCounter;
@@ -144,6 +156,10 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
     private void Destructor()
     {
+        // A background spill still uses its old unmanaged buffer and can write
+        // _measurements_reserved. It must finish before either pointer is freed.
+        SafeExecutor.Run(() => _AllocNewMemory.Wait());
+
         if (_measurements != null)
         {
             SafeExecutor.Run(() => NativeMemory.Free(_measurements));
@@ -156,7 +172,6 @@ unsafe internal sealed class MetricsCollector : IDisposable
             _measurements_reserved = null;
         }
 
-        _AllocNewMemory.Wait();
         _AllocNewMemory.Dispose();
     }
 }

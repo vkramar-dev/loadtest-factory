@@ -34,22 +34,8 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
             Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
-    internal void Start(int scenarioCount)
+    internal void Start()
     {
-        if (_consoleOutput)
-        {
-            try
-            {
-                int warmupSeconds = (int)((_measurementStart - _runStart) / Stopwatch.Frequency);
-                int durationSeconds = (int)((_measurementEnd - _measurementStart) / Stopwatch.Frequency);
-                ConsoleOutput.WriteHeader(_collectors.Length, warmupSeconds, durationSeconds, scenarioCount);
-            }
-            catch (Exception ex)
-            {
-                LogError(ex);
-            }
-        }
-
         _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
     }
 
@@ -159,7 +145,22 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
 
         try
         {
-            Console.WriteLine($"GC pauses: {count}");
+            ConsoleOutput.WriteMetric("GC pauses:", count.ToString("N0"));
+        }
+        catch (Exception ex)
+        {
+            LogError(ex);
+        }
+    }
+
+    internal void WriteWarnings(IEnumerable<LoadTestWarning> warnings)
+    {
+        if (!_consoleOutput)
+            return;
+
+        try
+        {
+            ConsoleOutput.WriteWarnings(warnings);
         }
         catch (Exception ex)
         {

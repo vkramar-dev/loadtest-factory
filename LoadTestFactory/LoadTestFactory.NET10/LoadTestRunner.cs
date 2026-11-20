@@ -27,6 +27,26 @@ public static class LoadTestRunner
 
             PathToFolder = GetPathToFolder(workingDirectory);
 
+            // Collect the load generator's environment before reserving measurement memory.
+            TestEnvironment testEnvironment = TestEnvironmentCollector.Capture(PathToFolder);
+            LoadTestWarning[] startupWarnings = TestEnvironmentCollector.GetStartupWarnings(
+                testEnvironment, checked(MetricsCollector.InitialBufferBytes * parallelAmount));
+
+            // Print resource warnings BEFORE allocating unmanaged buffers. A low-memory
+            // configuration must be visible even if the allocations subsequently fail.
+            if (consoleOutput)
+            {
+                try
+                {
+                    ConsoleOutput.WriteHeader(parallelAmount, warmupInSeconds, durationInSeconds,
+                        scenarios.Length, testEnvironment, startupWarnings);
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLogger.Write(ex, PathToFolder);
+                }
+            }
+
             MetricsCollector[] collectors = new MetricsCollector[parallelAmount];
             for (int i = 0; i < parallelAmount; ++i)
                 collectors[i] = new MetricsCollector(i);
@@ -56,7 +76,7 @@ public static class LoadTestRunner
 
             progressMonitor = new LoadTestProgressMonitor(collectors, runStartTimestamp,
                 measurementStartTimestamp, measurementEndTimestamp, consoleOutput);
-            progressMonitor.Start(scenarios.Length);
+            progressMonitor.Start();
 
             await Parallel.ForAsync<int>(0, parallelAmount, options, async (i, ct) =>
             {
@@ -86,6 +106,8 @@ public static class LoadTestRunner
 
             });
 
+            long actualMeasurementEndTimestamp = Stopwatch.GetTimestamp();
+
             // Stop timer callbacks before collectors are disposed. Always send one
             // final event containing the exact counts after all workers finish.
             await progressMonitor.CompleteAsync();
@@ -97,6 +119,26 @@ public static class LoadTestRunner
                 measurementEndTimestamp);
 
             progressMonitor.WriteGcPauseSummary(pauses.Length);
+
+            long blockingCount = 0;
+            long blockingTicks = 0;
+            long maxBlockingTicks = 0;
+            foreach (MetricsCollector collector in collectors)
+            {
+                blockingCount += collector.BufferBlockingCount;
+                blockingTicks += collector.BufferBlockingTicks;
+                maxBlockingTicks = Math.Max(maxBlockingTicks, collector.MaxBufferBlockingTicks);
+            }
+
+            List<LoadTestWarning> warnings = new(startupWarnings);
+            if (blockingCount > 0 && maxBlockingTicks >= Stopwatch.Frequency / 100)
+            {
+                warnings.Add(new LoadTestWarning("GENERATOR_BLOCKING",
+                    $"Measurement collectors waited for free buffers {blockingCount:N0} time(s) " +
+                    $"(max {maxBlockingTicks * 1000.0 / Stopwatch.Frequency:N0} ms). " +
+                    "Storage throughput or scheduling may be limiting the load generator."));
+                progressMonitor.WriteWarnings(warnings.Skip(startupWarnings.Length));
+            }
             progressMonitor = null;
 
             for (int i = 0; i < parallelAmount; ++i)
@@ -104,7 +146,24 @@ public static class LoadTestRunner
 
             GCCollector.Dispose();
 
-            return new LoadTestResult();
+            return new LoadTestResult
+            {
+                ParallelAmount = parallelAmount,
+                WarmupDuration = TimeSpan.FromSeconds(warmupInSeconds),
+                MeasurementDuration = TimeSpan.FromSeconds(durationInSeconds),
+                ActualMeasurementDuration = TimeSpan.FromSeconds(
+                    (actualMeasurementEndTimestamp - measurementStartTimestamp) / (double)Stopwatch.Frequency),
+                MeasurementStartedAtUtc = new DateTimeOffset(clockAnchorUtc.AddSeconds(warmupInSeconds)),
+                Environment = testEnvironment,
+                Warnings = warnings,
+                Engine = new EngineDiagnostics
+                {
+                    BufferBlockingCount = blockingCount,
+                    TotalBufferBlockingTime = TimeSpan.FromSeconds(blockingTicks / (double)Stopwatch.Frequency),
+                    MaxBufferBlockingTime = TimeSpan.FromSeconds(maxBlockingTicks / (double)Stopwatch.Frequency)
+                },
+                GcPauses = pauses
+            };
         }
         catch(Exception ex)
         {

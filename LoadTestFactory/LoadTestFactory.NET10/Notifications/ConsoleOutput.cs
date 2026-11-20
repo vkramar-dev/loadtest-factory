@@ -12,14 +12,15 @@ internal static class ConsoleOutput
         "#      #   #  #   #  #   #           #    #          #    #",
         "#####   ###   #   #  ####            #    #####  ####     #",
         "",
-        "         #####  #   #   ####  #####  #   #  #####",
-        "         #      ##  #  #        #    ##  #  #",
-        "         ####   # # #  # ###    #    # # #  ####",
-        "         #      #  ##  #   #    #    #  ##  #",
-        "         #####  #   #   ####  #####  #   #  #####"
+        "          #####  #   #   ####  #####  #   #  #####",
+        "          #      ##  #  #        #    ##  #  #",
+        "          ####   # # #  # ###    #    # # #  ####",
+        "          #      #  ##  #   #    #    #  ##  #",
+        "          #####  #   #   ####  #####  #   #  #####"
     ];
 
-    internal static void WriteHeader(int workers, int warmupSeconds, int durationSeconds, int scenarios)
+    internal static void WriteHeader(int workers, int warmupSeconds, int durationSeconds,
+        int scenarios, TestEnvironment environment, IReadOnlyList<LoadTestWarning> warnings)
     {
         Console.WriteLine();
 
@@ -46,16 +47,63 @@ internal static class ConsoleOutput
             ?? "dev";
 
         Console.WriteLine();
-        Console.WriteLine(new string('-', 60));
+        Separator();
         Console.WriteLine($".NET Load Testing | v{version}");
-        Console.WriteLine(new string('-', 60));
-        Console.WriteLine($"Workers:      {workers:N0}");
-        Console.WriteLine($"Scenarios:    {scenarios:N0}");
-        Console.WriteLine($"Warmup:       {warmupSeconds} seconds");
-        Console.WriteLine($"Measurement:  {durationSeconds} seconds");
-        Console.WriteLine(new string('-', 60));
+        Separator();
+        WriteMetric("OS:", $"{environment.OperatingSystem} ({environment.OSArchitecture})");
+        WriteMetric("Runtime:", environment.Runtime);
+        WriteMetric("Process:", environment.ProcessArchitecture);
+        if (!string.IsNullOrWhiteSpace(environment.CpuModel))
+            WriteMetric("CPU:", environment.CpuModel);
+        WriteMetric("Logical CPUs:", environment.LogicalProcessorCount.ToString("N0"));
+        if (environment.CpuFrequencyMHz is double frequency)
+            WriteMetric("CPU clock:", $"{frequency / 1000.0:N2} GHz (OS-reported)");
+        WriteMetric("GC Mode:", environment.IsServerGC ? "Server" : "Workstation");
+        WriteMetric("Memory free:", FormatAvailable(environment.AvailablePhysicalMemoryBytes,
+            environment.TotalPhysicalMemoryBytes));
+        WriteMetric("Storage free:", FormatAvailable(environment.AvailableStorageBytes));
+        if (environment.StorageVolumeType != null)
+            WriteMetric("Volume type:", environment.StorageFileSystem is null
+                ? environment.StorageVolumeType
+                : $"{environment.StorageVolumeType} ({environment.StorageFileSystem})");
+        WriteMetric("Storage path:", environment.StoragePath);
+        Separator();
+        WriteMetric("Workers:", workers.ToString("N0"));
+        WriteMetric("Scenarios:", scenarios.ToString("N0"));
+        WriteMetric("Warmup:", $"{warmupSeconds} seconds");
+        WriteMetric("Measurement:", $"{durationSeconds} seconds");
+        Separator();
+        WriteWarnings(warnings);
         Console.WriteLine();
         Console.WriteLine("Starting load test...");
+    }
+
+    internal static void WriteMetric(string label, string value)
+    {
+        // Console tab stops are every 8 columns. All header labels fit within
+        // 16 columns, so one or two actual TAB characters align every value.
+        string tabs = label.Length < 8 ? "\t\t" : "\t";
+        Console.WriteLine($"{label}{tabs}{value}");
+    }
+
+    internal static void WriteWarnings(IEnumerable<LoadTestWarning> warnings)
+    {
+        foreach (LoadTestWarning warning in warnings)
+        {
+            bool colored = !Console.IsOutputRedirected;
+            ConsoleColor previousColor = Console.ForegroundColor;
+            try
+            {
+                if (colored)
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"WARNING [{warning.Code}]: {warning.Message}");
+            }
+            finally
+            {
+                if (colored)
+                    Console.ForegroundColor = previousColor;
+            }
+        }
     }
 
     internal static void WriteProgress(LoadTestProgressEventArgs progress)
@@ -83,6 +131,17 @@ internal static class ConsoleOutput
 
         Console.WriteLine(line);
     }
+
+    private static string FormatAvailable(long? free, long? total = null)
+    {
+        if (free is not long bytes)
+            return "Unknown";
+        return total is long size
+            ? $"{TestEnvironmentCollector.FormatBytes(bytes)} / {TestEnvironmentCollector.FormatBytes(size)} total"
+            : TestEnvironmentCollector.FormatBytes(bytes);
+    }
+
+    private static void Separator() => Console.WriteLine(new string('-', 60));
 
     private static string FormatElapsed(TimeSpan value) =>
         $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}";
