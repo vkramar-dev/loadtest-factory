@@ -227,6 +227,7 @@ public static class LoadTestRunner
         {
             if (progressMonitor != null)
                 await progressMonitor.DisposeAsync();
+
             if (consoleOutput)
             {
                 try
