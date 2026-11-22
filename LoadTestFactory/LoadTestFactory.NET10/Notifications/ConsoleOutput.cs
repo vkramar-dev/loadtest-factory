@@ -24,62 +24,70 @@ internal static class ConsoleOutput
     ];
 
     internal static void WriteHeader(int workers, int warmupSeconds, int durationSeconds,
-        int scenarios, TestEnvironment environment, IReadOnlyList<LoadTestWarning> warnings)
+        int scenarios, TestEnvironment environment, IReadOnlyList<LoadTestWarning> warnings, string pathToFolder)
     {
-        Console.WriteLine();
-
-        bool colored = !Console.IsOutputRedirected;
-        ConsoleColor previousColor = Console.ForegroundColor;
         try
         {
-            if (colored)
-                Console.ForegroundColor = ConsoleColor.Cyan;
 
-            foreach (string line in Banner)
-                Console.WriteLine(line);
+            Console.WriteLine();
+
+            bool colored = !Console.IsOutputRedirected;
+            ConsoleColor previousColor = Console.ForegroundColor;
+            try
+            {
+                if (colored)
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+
+                foreach (string line in Banner)
+                    Console.WriteLine(line);
+            }
+            finally
+            {
+                if (colored)
+                    Console.ForegroundColor = previousColor;
+            }
+
+            string version = typeof(LoadTestRunner).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+                .InformationalVersion?.Split('+')[0]
+                ?? typeof(LoadTestRunner).Assembly.GetName().Version?.ToString(3)
+                ?? "dev";
+
+            Console.WriteLine();
+            Separator();
+            Console.WriteLine($".NET Load Testing | v{version}");
+            Separator();
+            WriteMetric("OS:", $"{environment.OperatingSystem} ({environment.OSArchitecture})");
+            WriteMetric("Runtime:", environment.Runtime);
+            WriteMetric("Process:", environment.ProcessArchitecture);
+            if (!string.IsNullOrWhiteSpace(environment.CpuModel))
+                WriteMetric("CPU:", environment.CpuModel);
+            WriteMetric("Logical CPUs:", environment.LogicalProcessorCount.ToString("N0"));
+            if (environment.CpuFrequencyMHz is double frequency)
+                WriteMetric("CPU clock:", $"{frequency / 1000.0:N2} GHz (OS-reported)");
+            WriteMetric("GC Mode:", environment.IsServerGC ? "Server" : "Workstation");
+            WriteMetric("Memory free:", FormatAvailable(environment.AvailablePhysicalMemoryBytes,
+                environment.TotalPhysicalMemoryBytes));
+            WriteMetric("Storage free:", FormatAvailable(environment.AvailableStorageBytes));
+            if (environment.StorageVolumeType != null)
+                WriteMetric("Volume type:", environment.StorageFileSystem is null
+                    ? environment.StorageVolumeType
+                    : $"{environment.StorageVolumeType} ({environment.StorageFileSystem})");
+            WriteMetric("Storage path:", environment.StoragePath);
+            Separator();
+            WriteMetric("Workers:", workers.ToString("N0"));
+            WriteMetric("Scenarios:", scenarios.ToString("N0"));
+            WriteMetric("Warmup:", $"{warmupSeconds} seconds");
+            WriteMetric("Measurement:", $"{durationSeconds} seconds");
+            Separator();
+            WriteWarnings(warnings);
+            Console.WriteLine();
+            Console.WriteLine("Starting load test...");
         }
-        finally
+        catch(Exception ex)
         {
-            if (colored)
-                Console.ForegroundColor = previousColor;
+            DiagnosticLogger.Write(ex, pathToFolder);
         }
-
-        string version = typeof(LoadTestRunner).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion?.Split('+')[0]
-            ?? typeof(LoadTestRunner).Assembly.GetName().Version?.ToString(3)
-            ?? "dev";
-
-        Console.WriteLine();
-        Separator();
-        Console.WriteLine($".NET Load Testing | v{version}");
-        Separator();
-        WriteMetric("OS:", $"{environment.OperatingSystem} ({environment.OSArchitecture})");
-        WriteMetric("Runtime:", environment.Runtime);
-        WriteMetric("Process:", environment.ProcessArchitecture);
-        if (!string.IsNullOrWhiteSpace(environment.CpuModel))
-            WriteMetric("CPU:", environment.CpuModel);
-        WriteMetric("Logical CPUs:", environment.LogicalProcessorCount.ToString("N0"));
-        if (environment.CpuFrequencyMHz is double frequency)
-            WriteMetric("CPU clock:", $"{frequency / 1000.0:N2} GHz (OS-reported)");
-        WriteMetric("GC Mode:", environment.IsServerGC ? "Server" : "Workstation");
-        WriteMetric("Memory free:", FormatAvailable(environment.AvailablePhysicalMemoryBytes,
-            environment.TotalPhysicalMemoryBytes));
-        WriteMetric("Storage free:", FormatAvailable(environment.AvailableStorageBytes));
-        if (environment.StorageVolumeType != null)
-            WriteMetric("Volume type:", environment.StorageFileSystem is null
-                ? environment.StorageVolumeType
-                : $"{environment.StorageVolumeType} ({environment.StorageFileSystem})");
-        WriteMetric("Storage path:", environment.StoragePath);
-        Separator();
-        WriteMetric("Workers:", workers.ToString("N0"));
-        WriteMetric("Scenarios:", scenarios.ToString("N0"));
-        WriteMetric("Warmup:", $"{warmupSeconds} seconds");
-        WriteMetric("Measurement:", $"{durationSeconds} seconds");
-        Separator();
-        WriteWarnings(warnings);
-        Console.WriteLine();
-        Console.WriteLine("Starting load test...");
     }
 
     internal static void WriteMetric(string label, string value)

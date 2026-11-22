@@ -27,10 +27,12 @@ unsafe internal sealed class MetricsCollector : IDisposable
     private bool _completed;
     private long _completedMeasurementCount;
     private int _disposed;
+    private string _pathToFolder;
 
-    public MetricsCollector(int collectorNumber)
+    public MetricsCollector(int collectorNumber, string pathToFolder)
     {
         _collectorNumber = collectorNumber;
+        _pathToFolder = pathToFolder;
 
         _measurements = (Measurement*)NativeMemory.AllocZeroed(
             (nuint)Capacity,
@@ -103,7 +105,7 @@ unsafe internal sealed class MetricsCollector : IDisposable
         _AllocNewMemory = Task.Factory.StartNew(() =>
         {
             string backupFileName = Path.Combine(
-                                        LoadTestRunner.PathToFolder,
+                                        _pathToFolder,
                                         $"load_test_{_collectorNumber}_{_MeasurementSegmentCounter}.bin");
 
 
@@ -173,7 +175,7 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
         if (_index > 0)
         {
-            string fileName = Path.Combine(LoadTestRunner.PathToFolder,
+            string fileName = Path.Combine(_pathToFolder,
                 $"load_test_{_collectorNumber}_{_MeasurementSegmentCounter}.bin");
 
             using (var handle = File.OpenHandle(
@@ -198,8 +200,8 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
         string[] files = new string[_MeasurementSegmentCounter];
         for (int i = 0; i < files.Length; ++i)
-            files[i] = Path.Combine(LoadTestRunner.PathToFolder,
-                $"load_test_{_collectorNumber}_{i}.bin");
+            files[i] = Path.Combine(_pathToFolder, $"load_test_{_collectorNumber}_{i}.bin");
+
         return files;
     }
 

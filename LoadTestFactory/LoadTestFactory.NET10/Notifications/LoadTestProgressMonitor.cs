@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using static LoadTestFactory.LoadTestContext;
 
 namespace LoadTestFactory.Notifications;
 
@@ -185,7 +186,7 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
     }
 
     private static void LogError(Exception ex) =>
-        DiagnosticLogger.Write(ex, LoadTestRunner.PathToFolder);
+        DiagnosticLogger.Write(ex, GlobalState.PathToFolder);
 
     public ValueTask DisposeAsync() => _timer.DisposeAsync();
 }

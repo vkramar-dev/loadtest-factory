@@ -32,7 +32,7 @@ internal sealed class ConsoleStageProgress : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.Write(ex, LoadTestRunner.PathToFolder);
+            //DiagnosticLogger.Write(ex, App.PathToFolder);
         }
     }
 

@@ -9,12 +9,7 @@ internal static class ScenarioExecutor
         try
         {
             await scenario.MethodHandler(scenario.Name);
-
             return null;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
         }
         catch(Exception ex)
         {
