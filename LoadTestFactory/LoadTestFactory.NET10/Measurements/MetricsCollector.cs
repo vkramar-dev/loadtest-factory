@@ -9,10 +9,11 @@ unsafe internal sealed class MetricsCollector : IDisposable
 
     internal const int Capacity = 1_000_000;
     internal static long InitialBufferBytes => 2L * Capacity * sizeof(Measurement);
+    internal static readonly AsyncLocal<MetricsCollector> Current = new();
     Measurement* _measurements = null;
     Measurement* _measurements_reserved = null;
     volatile int _MeasurementSegmentCounter = 0;
-    int _index = 0;
+    volatile int _index = 0;
 
     // One writer per collector; the monitoring timer only reads these counters.
     // Do not derive progress from _MeasurementSegmentCounter, which is updated
@@ -28,6 +29,7 @@ unsafe internal sealed class MetricsCollector : IDisposable
     private long _completedMeasurementCount;
     private int _disposed;
     private string _pathToFolder;
+    private object _lock = new ();
 
     public MetricsCollector(int collectorNumber, string pathToFolder)
     {
@@ -47,12 +49,16 @@ unsafe internal sealed class MetricsCollector : IDisposable
     {
         if (_completed)
             throw new InvalidOperationException("Cannot add measurements after collector completion.");
-        if (_index == Capacity)
-        {
-            HandleMemoryDepleting();
-        }
 
-        _measurements[_index++] = measurement;
+        lock (_lock)
+        {
+            if (_index == Capacity)
+            {
+                HandleMemoryDepleting();
+            }
+
+            _measurements[_index++] = measurement;
+        }
     }
 
     public void AddMeasurementWithError(ref Measurement measurement, string error)

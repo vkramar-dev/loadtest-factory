@@ -75,6 +75,8 @@ public static class LoadTestRunner
                 }
 
                 MetricsCollector currentCollector = ctx.Collectors[i];
+                MetricsCollector.Current.Value = currentCollector;
+
                 while (!ct.IsCancellationRequested)
                 {
                     if (Stopwatch.GetTimestamp() >= measurementEndTimestamp)

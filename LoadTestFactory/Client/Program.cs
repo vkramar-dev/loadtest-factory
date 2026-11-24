@@ -1,4 +1,5 @@
 ﻿using LoadTestFactory;
+using LoadTestFactory.Measurements;
 using LoadTestFactory.Results;
 
 //TestScenario[] tests = new TestScenario[]
@@ -38,6 +39,9 @@ static TestScenario CreateScenario(string name, int weight)
         {
             await Task.Delay(1);
 
+            await MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
+
+            await Task.Delay(1);
             //await Task.CompletedTask;
         }
     );
