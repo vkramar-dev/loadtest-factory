@@ -12,6 +12,7 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
     private readonly long _measurementEnd;
     private readonly int _measurementDurationSeconds;
     private readonly bool _consoleOutput;
+    private readonly bool _measureScenarios;
     private readonly Timer _timer;
 
     private long _lastMeasurementSample;
@@ -25,7 +26,8 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
         long measurementStart,
         long measurementEnd,
         int measurementDurationSeconds,
-        bool consoleOutput)
+        bool consoleOutput,
+        bool measureScenarios)
     {
         _collectors = collectors;
         _runStart = runStart;
@@ -33,6 +35,7 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
         _measurementEnd = measurementEnd;
         _measurementDurationSeconds = measurementDurationSeconds;
         _consoleOutput = consoleOutput;
+        _measureScenarios = measureScenarios;
         _lastMeasurementSample = measurementStart;
 
         _timer = new Timer(TimerCallback, null,
@@ -145,7 +148,7 @@ internal sealed class LoadTestProgressMonitor : IAsyncDisposable
         {
             try
             {
-                ConsoleOutput.WriteProgress(args);
+                ConsoleOutput.WriteProgress(args, _measureScenarios);
             }
             catch (Exception ex)
             {

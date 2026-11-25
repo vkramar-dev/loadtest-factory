@@ -180,7 +180,8 @@ internal sealed class LoadTestContext
         OverallStartedAt = Stopwatch.GetTimestamp();
 
         ProgressMonitor = new LoadTestProgressMonitor(Collectors, RunStartTimestamp,
-            MeasurementStartTimestamp, MeasurementEndTimestamp, DurationInSeconds, IsConsoleOutput);
+            MeasurementStartTimestamp, MeasurementEndTimestamp, DurationInSeconds, IsConsoleOutput,
+            Scenarios.Any(scenario => scenario.MeasureScenario));
 
         ProgressMonitor.Start();
     }
@@ -307,7 +308,8 @@ internal sealed class LoadTestContext
             GcPauses = pauses,
             OverallStatistics = processed.Overall,
             CompletionTail = processed.CompletionTail,
-            Scenarios = processed.Scenarios
+            Scenarios = processed.Scenarios,
+            MeasuredCalls = processed.MeasuredCalls
         };
 
         return Result;

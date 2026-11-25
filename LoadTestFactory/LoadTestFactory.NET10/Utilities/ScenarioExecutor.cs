@@ -22,6 +22,12 @@ internal static class ScenarioExecutor
         MetricsCollector collector,
         long measurementEndTimestamp)
     {
+        if (!scenario.MeasureScenario)
+        {
+            await scenario.ExecuteSafeAsync();
+            return;
+        }
+
         long start = Stopwatch.GetTimestamp();
 
         Exception error = await scenario.ExecuteSafeAsync();

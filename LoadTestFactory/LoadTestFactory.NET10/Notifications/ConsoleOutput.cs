@@ -118,7 +118,7 @@ internal static class ConsoleOutput
         }
     }
 
-    internal static void WriteProgress(LoadTestProgressEventArgs progress)
+    internal static void WriteProgress(LoadTestProgressEventArgs progress, bool measureScenarios)
     {
         string phase = progress.Phase switch
         {
@@ -131,7 +131,7 @@ internal static class ConsoleOutput
         string duration = FormatElapsed(progress.Duration);
         string line = $"[{phase,-11}] {elapsed} / {duration} ({progress.Percentage,5:F1}%)";
 
-        if (progress.Phase != LoadTestPhase.Warmup)
+        if (measureScenarios && progress.Phase != LoadTestPhase.Warmup)
         {
             line += $" | Executions: {progress.Completed:N0} | Failures: {progress.Failed:N0}";
             line += progress.Phase == LoadTestPhase.Completed
@@ -248,7 +248,7 @@ internal static class ConsoleOutput
         {
             if (line == "OVERALL" || line == "OVERALL:")
                 inOverall = true;
-            else if (line.StartsWith("SCENARIOS", StringComparison.Ordinal))
+            else if (line.Length == 0)
                 inOverall = false;
 
             int valueStart = -1;

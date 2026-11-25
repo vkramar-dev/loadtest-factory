@@ -48,6 +48,9 @@ public sealed class LoadTestResult
     /// <summary>Gets the individual results of the test scenarios.</summary>
     public IReadOnlyList<ScenarioResult> Scenarios { get; init; } = Array.Empty<ScenarioResult>();
 
+    /// <summary>Gets the individual results of measured calls.</summary>
+    public IReadOnlyList<MeasuredCallResult> MeasuredCalls { get; init; } = Array.Empty<MeasuredCallResult>();
+
     /// <summary>Returns a compact human-readable summary suitable for console output.</summary>
     public override string ToString() => FormatSummary(includeWarnings: true);
 
@@ -67,68 +70,118 @@ public sealed class LoadTestResult
         sb.AppendLine("LOAD TEST RESULTS:");
         sb.AppendLine(new string('-', 60));
 
-        sb.AppendLine();
-        sb.AppendLine("OVERALL:");
-        AppendMetric(sb, "Executions:", overall.TotalCount.ToString("N0"));
-        AppendMetric(sb, "Successful:", overall.SuccessCount.ToString("N0"));
-        AppendMetric(sb, "Failed:", $"{overall.FailedCount:N0} ({overall.FailureRate:N2}%)");
-        AppendMetric(sb, "RPS (mean):", throughput.Mean.ToString("N2"));
-        AppendMetric(sb, "RPS (min / peak):", $"{throughput.Min:N2} / {throughput.Peak:N2}");
-        AppendMetric(sb, "Latency mean:", FormatMeanLatency(latency));
-        AppendMetric(sb, "Latency P50:", FormatLatency(latency.P50));
-        AppendMetric(sb, "Latency P90:", FormatLatency(latency.P90));
-        AppendMetric(sb, "Latency P95:", FormatLatency(latency.P95));
-        AppendMetric(sb, "Latency P99:", FormatLatency(latency.P99));
-        AppendMetric(sb, "Latency P99.9:", FormatLatency(latency.P999));
-        if (latency.Top5Min?.Count > 0)
-            AppendMetric(sb, "Fastest sample:", FormatLatency(latency.Top5Min[0].Duration));
-        if (latency.Top5Max?.Count > 0)
-            AppendMetric(sb, "Slowest sample:", FormatLatency(latency.Top5Max[0].Duration));
+        bool hasScenarioMeasurements = overall.TotalCount > 0;
+        bool hasMeasuredCalls = MeasuredCalls?.Any(call => call?.Statistics?.TotalCount > 0) == true;
 
-        sb.AppendLine();
-        sb.AppendLine("SCENARIOS (latency in ms)");
-        string[] headers = ["Scenario", "Weight", "Count", "Failed", "RPS", "Mean", "P95", "P99"];
-        int[] widths = new int[headers.Length];
-        for (int i = 0; i < headers.Length; ++i)
-            widths[i] = headers[i].Length;
-
-        // Measure every column before rendering: all numeric columns stay
-        // right-aligned even when the counters contain billions of executions.
-        List<string[]> rows = new(Scenarios?.Count ?? 0);
-        if (Scenarios != null)
+        if (!hasScenarioMeasurements && !hasMeasuredCalls)
         {
-            foreach (ScenarioResult scenario in Scenarios)
+            sb.AppendLine();
+            sb.AppendLine("No measurements completed within the measurement window.");
+        }
+
+        if (hasScenarioMeasurements)
+        {
+            sb.AppendLine();
+            sb.AppendLine("OVERALL:");
+            AppendMetric(sb, "Executions:", overall.TotalCount.ToString("N0"));
+            AppendMetric(sb, "Successful:", overall.SuccessCount.ToString("N0"));
+            AppendMetric(sb, "Failed:", $"{overall.FailedCount:N0} ({overall.FailureRate:N2}%)");
+            AppendMetric(sb, "RPS (mean):", throughput.Mean.ToString("N2"));
+            AppendMetric(sb, "RPS (min / peak):", $"{throughput.Min:N2} / {throughput.Peak:N2}");
+            AppendMetric(sb, "Latency mean:", FormatMeanLatency(latency));
+            AppendMetric(sb, "Latency P50:", FormatLatency(latency.P50));
+            AppendMetric(sb, "Latency P90:", FormatLatency(latency.P90));
+            AppendMetric(sb, "Latency P95:", FormatLatency(latency.P95));
+            AppendMetric(sb, "Latency P99:", FormatLatency(latency.P99));
+            AppendMetric(sb, "Latency P99.9:", FormatLatency(latency.P999));
+            if (latency.Top5Min?.Count > 0)
+                AppendMetric(sb, "Fastest sample:", FormatLatency(latency.Top5Min[0].Duration));
+            if (latency.Top5Max?.Count > 0)
+                AppendMetric(sb, "Slowest sample:", FormatLatency(latency.Top5Max[0].Duration));
+        }
+
+        if (hasScenarioMeasurements && Scenarios?.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("SCENARIOS (latency in ms)");
+            string[] headers = ["Scenario", "Weight", "Count", "Failed", "RPS", "Mean", "P95", "P99"];
+            int[] widths = new int[headers.Length];
+            for (int i = 0; i < headers.Length; ++i)
+                widths[i] = headers[i].Length;
+
+            // Measure every column before rendering: all numeric columns stay
+            // right-aligned even when the counters contain billions of executions.
+            List<string[]> rows = new(Scenarios?.Count ?? 0);
+            if (Scenarios != null)
             {
-                if (scenario == null)
+                foreach (ScenarioResult scenario in Scenarios)
+                {
+                    if (scenario == null)
+                        continue;
+
+                    ExecutionStatistics stats = scenario.Statistics ?? new();
+                    LatencyStatistics scenarioLatency = stats.Latency ?? new();
+                    string[] row =
+                    [
+                        scenario.Name ?? "(unnamed)",
+                        scenario.Weight.ToString("N0"),
+                        stats.TotalCount.ToString("N0"),
+                        stats.FailedCount.ToString("N0"),
+                        (stats.Throughput?.Mean ?? 0).ToString("N2"),
+                        FormatMeanLatencyValue(scenarioLatency),
+                        FormatLatencyValue(scenarioLatency.P95),
+                        FormatLatencyValue(scenarioLatency.P99)
+                    ];
+                    for (int i = 0; i < widths.Length; ++i)
+                        widths[i] = Math.Max(widths[i], row[i].Length);
+
+                    rows.Add(row);
+                }
+            }
+
+            AppendScenarioRow(sb, headers, widths);
+            int tableWidth = widths.Length - 1; // One separating space per pair of columns.
+            foreach (int width in widths)
+                tableWidth += width;
+            sb.AppendLine(new string('-', tableWidth));
+            foreach (string[] row in rows)
+                AppendScenarioRow(sb, row, widths);
+        }
+
+        if (hasMeasuredCalls)
+        {
+            sb.AppendLine();
+            sb.AppendLine("MEASURED CALLS (latency in ms)");
+            string[] callHeaders = ["Call", "Count", "Failed", "RPS", "Mean", "P95", "P99"];
+            int[] callWidths = callHeaders.Select(header => header.Length).ToArray();
+            List<string[]> callRows = new(MeasuredCalls.Count);
+            foreach (MeasuredCallResult call in MeasuredCalls)
+            {
+                if (call?.Statistics == null || call.Statistics.TotalCount == 0)
                     continue;
 
-                ExecutionStatistics stats = scenario.Statistics ?? new();
-                LatencyStatistics scenarioLatency = stats.Latency ?? new();
+                ExecutionStatistics stats = call.Statistics ?? new();
+                LatencyStatistics callLatency = stats.Latency ?? new();
                 string[] row =
                 [
-                    scenario.Name ?? "(unnamed)",
-                    scenario.Weight.ToString("N0"),
+                    call.Name ?? "(unnamed)",
                     stats.TotalCount.ToString("N0"),
                     stats.FailedCount.ToString("N0"),
                     (stats.Throughput?.Mean ?? 0).ToString("N2"),
-                    FormatMeanLatencyValue(scenarioLatency),
-                    FormatLatencyValue(scenarioLatency.P95),
-                    FormatLatencyValue(scenarioLatency.P99)
+                    FormatMeanLatencyValue(callLatency),
+                    FormatLatencyValue(callLatency.P95),
+                    FormatLatencyValue(callLatency.P99)
                 ];
-                for (int i = 0; i < widths.Length; ++i)
-                    widths[i] = Math.Max(widths[i], row[i].Length);
-
-                rows.Add(row);
+                for (int i = 0; i < callWidths.Length; ++i)
+                    callWidths[i] = Math.Max(callWidths[i], row[i].Length);
+                callRows.Add(row);
             }
-        }
 
-        AppendScenarioRow(sb, headers, widths);
-        int tableWidth = widths.Length - 1; // One separating space per pair of columns.
-        foreach (int width in widths)
-            tableWidth += width;
-        sb.AppendLine(new string('-', tableWidth));
-        foreach (string[] row in rows)
-            AppendScenarioRow(sb, row, widths);
+            AppendScenarioRow(sb, callHeaders, callWidths);
+            sb.AppendLine(new string('-', callWidths.Sum() + callWidths.Length - 1));
+            foreach (string[] row in callRows)
+                AppendScenarioRow(sb, row, callWidths);
+        }
 
         bool hasErrors = false;
         if (Scenarios != null)

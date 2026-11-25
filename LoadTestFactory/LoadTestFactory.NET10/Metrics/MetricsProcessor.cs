@@ -8,6 +8,7 @@ internal sealed class MetricsProcessingResult
     internal ExecutionStatistics Overall { get; init; }
     internal CompletionTailStatistics CompletionTail { get; init; }
     internal ScenarioResult[] Scenarios { get; init; }
+    internal MeasuredCallResult[] MeasuredCalls { get; init; }
 }
 
 /// <summary>
@@ -28,17 +29,31 @@ internal static class MetricsProcessor
         int measurementSeconds,
         CancellationToken cancellationToken = default)
     {
-        Dictionary<int, ScenarioAccumulator> byId = new(scenarios.Length);
+        scenarios = scenarios.Where(s => s.MeasureScenario).ToArray();
+
+        var measuredCalls = MeasuredCall.GetRegisteredCalls();
+        Dictionary<int, ScenarioAccumulator> byId = new(scenarios.Length + measuredCalls.Length);
+        ScenarioAccumulator[] measuredCallStats = new ScenarioAccumulator[measuredCalls.Length];
         ScenarioAccumulator[] scenarioStats = new ScenarioAccumulator[scenarios.Length];
 
         for (int i = 0; i < scenarios.Length; ++i)
         {
             TestScenario scenario = scenarios[i];
-            ScenarioAccumulator stats = new(scenario, measurementSeconds, measurementStartTimestamp);
+            ScenarioAccumulator stats = new(scenario.Name, scenario.Weight, measurementSeconds, measurementStartTimestamp);
             if (!byId.TryAdd(scenario.Id, stats))
                 throw new ArgumentException($"Duplicate scenario ID: {scenario.Id}.", nameof(scenarios));
 
             scenarioStats[i] = stats;
+        }
+
+        for (int i = 0; i < measuredCalls.Length; ++i)
+        {
+            var call = measuredCalls[i];
+            ScenarioAccumulator stats = new(call.Key, 0, measurementSeconds, measurementStartTimestamp);
+            if (!byId.TryAdd(call.Value, stats))
+                throw new InvalidOperationException($"Duplicate measured call ID: {call.Value}.");
+
+            measuredCallStats[i] = stats;
         }
 
         byte[][] readBuffers = [new byte[ChunkBytes], new byte[ChunkBytes]];
@@ -70,10 +85,22 @@ internal static class MetricsProcessor
 
             results[i] = new ScenarioResult
             {
-                Name = scenario.Scenario.Name,
-                Weight = scenario.Scenario.Weight,
+                Name = scenario.Name,
+                Weight = scenario.Weight,
                 Statistics = scenario.Normal.BuildExecutionStatistics(measurementSeconds),
                 CompletionTail = scenario.Tail.BuildCompletionTail()
+            };
+        }
+
+        MeasuredCallResult[] callResults = new MeasuredCallResult[measuredCallStats.Length];
+        for (int i = 0; i < measuredCallStats.Length; ++i)
+        {
+            ScenarioAccumulator call = measuredCallStats[i];
+            callResults[i] = new MeasuredCallResult
+            {
+                Name = call.Name,
+                Statistics = call.Normal.BuildExecutionStatistics(measurementSeconds),
+                CompletionTail = call.Tail.BuildCompletionTail()
             };
         }
 
@@ -81,7 +108,8 @@ internal static class MetricsProcessor
         {
             Overall = overall.BuildExecutionStatistics(measurementSeconds),
             CompletionTail = overallTail.BuildCompletionTail(),
-            Scenarios = results
+            Scenarios = results,
+            MeasuredCalls = callResults
         };
     }
 
@@ -165,19 +193,21 @@ internal static class MetricsProcessor
             StatisticsAccumulator destination = finishedAt < measurementEnd
                 ? scenario.Normal : scenario.Tail;
 
-            destination.Record(in measurement, finishedAt, scenario.Scenario.Name, errorType);
+            destination.Record(in measurement, finishedAt, scenario.Name, errorType);
         }
     }
 
     private sealed class ScenarioAccumulator
     {
-        internal readonly TestScenario Scenario;
+        internal readonly string Name;
+        internal readonly int Weight;
         internal readonly StatisticsAccumulator Normal;
         internal readonly StatisticsAccumulator Tail;
 
-        internal ScenarioAccumulator(TestScenario scenario, int seconds, long start)
+        internal ScenarioAccumulator(string name, int weight, int seconds, long start)
         {
-            Scenario = scenario;
+            Name = name;
+            Weight = weight;
             Normal = new StatisticsAccumulator(seconds, start, true);
             Tail = new StatisticsAccumulator(0, start, false);
         }

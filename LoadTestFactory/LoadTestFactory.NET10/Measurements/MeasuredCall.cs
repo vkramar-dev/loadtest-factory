@@ -7,6 +7,8 @@ public static class MeasuredCall
     readonly static ConcurrentDictionary<string, int> IdResolver = new();
     static int IdCounter = 1024;
 
+    internal static KeyValuePair<string, int>[] GetRegisteredCalls() => IdResolver.ToArray();
+
     public static async Task AsyncRun(string name, Func<Task> testCallHandler)
     {
         int scenarioId = IdResolver.GetOrAdd(
@@ -32,7 +34,25 @@ public static class MeasuredCall
 
     public static async Task<T> AsyncRun<T>(string name, Func<Task<T>> testCallHandler)
     {
+        int scenarioId = IdResolver.GetOrAdd(
+            name, static _ => Interlocked.Increment(ref IdCounter));
+
         MetricsCollector collector = MetricsCollector.Current.Value;
-        return await testCallHandler();
+        if (collector == null)
+        {
+            return await testCallHandler();
+        }
+
+        long start = Stopwatch.GetTimestamp();
+
+        T result = await testCallHandler();
+
+        long completionTimestamp = Stopwatch.GetTimestamp();
+        long elapsedTicks = completionTimestamp - start;
+        Measurement newMeasurement = new(scenarioId, start, elapsedTicks);
+
+        collector.AddMeasurement(ref newMeasurement);
+
+        return result;
     }
 }
