@@ -24,7 +24,12 @@ internal static class ScenarioExecutor
     {
         if (!scenario.MeasureScenario)
         {
-            await scenario.ExecuteSafeAsync();
+            Exception ex = await scenario.ExecuteSafeAsync();
+            if (ex != null)
+            {
+                Measurement errorMeasure = new(scenario.Id, Stopwatch.GetTimestamp(), 0);
+                collector.AddMeasurementWithError(ref errorMeasure, ex.GetType().Name);
+            }
             return;
         }
 

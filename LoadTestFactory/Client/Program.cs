@@ -39,7 +39,9 @@ static TestScenario CreateScenario(string name, int weight)
         {
             await Task.Delay(0);
 
-            MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
+            throw new InvalidCastException();
+
+            MeasuredCall.AsyncRun("test-001", () => { Task.Delay(1); throw new ApplicationException(); });
 
             await Task.Delay(0);
             //await Task.CompletedTask;
