@@ -29,8 +29,6 @@ internal static class MetricsProcessor
         int measurementSeconds,
         CancellationToken cancellationToken = default)
     {
-        scenarios = scenarios.Where(s => s.MeasureScenario).ToArray();
-
         var measuredCalls = MeasuredCall.GetRegisteredCalls();
         Dictionary<int, ScenarioAccumulator> byId = new(scenarios.Length + measuredCalls.Length);
         ScenarioAccumulator[] measuredCallStats = new ScenarioAccumulator[measuredCalls.Length];
@@ -39,7 +37,8 @@ internal static class MetricsProcessor
         for (int i = 0; i < scenarios.Length; ++i)
         {
             TestScenario scenario = scenarios[i];
-            ScenarioAccumulator stats = new(scenario.Name, scenario.Weight, measurementSeconds, measurementStartTimestamp);
+            ScenarioAccumulator stats = new(scenario.Name, scenario.Weight, measurementSeconds,
+                measurementStartTimestamp, scenario.MeasureScenario);
             if (!byId.TryAdd(scenario.Id, stats))
                 throw new ArgumentException($"Duplicate scenario ID: {scenario.Id}.", nameof(scenarios));
 
@@ -80,14 +79,20 @@ internal static class MetricsProcessor
         for (int i = 0; i < scenarioStats.Length; ++i)
         {
             ScenarioAccumulator scenario = scenarioStats[i];
-            overall.MergeFrom(scenario.Normal);
-            overallTail.MergeFrom(scenario.Tail);
+            if (scenario.MeasureExecutions)
+            {
+                overall.MergeFrom(scenario.Normal);
+                overallTail.MergeFrom(scenario.Tail);
+            }
 
             results[i] = new ScenarioResult
             {
                 Name = scenario.Name,
                 Weight = scenario.Weight,
-                Statistics = scenario.Normal.BuildExecutionStatistics(measurementSeconds),
+                MeasureScenario = scenario.MeasureExecutions,
+                Statistics = scenario.MeasureExecutions
+                    ? scenario.Normal.BuildExecutionStatistics(measurementSeconds)
+                    : new ExecutionStatistics { Errors = scenario.Normal.BuildErrors() },
                 CompletionTail = scenario.Tail.BuildCompletionTail()
             };
         }
@@ -193,6 +198,13 @@ internal static class MetricsProcessor
             StatisticsAccumulator destination = finishedAt < measurementEnd
                 ? scenario.Normal : scenario.Tail;
 
+            if (!scenario.MeasureExecutions)
+            {
+                if (errorType != null)
+                    destination.RecordError(errorType, finishedAt);
+                continue;
+            }
+
             destination.Record(in measurement, finishedAt, scenario.Name, errorType);
         }
     }
@@ -201,14 +213,16 @@ internal static class MetricsProcessor
     {
         internal readonly string Name;
         internal readonly int Weight;
+        internal readonly bool MeasureExecutions;
         internal readonly StatisticsAccumulator Normal;
         internal readonly StatisticsAccumulator Tail;
 
-        internal ScenarioAccumulator(string name, int weight, int seconds, long start)
+        internal ScenarioAccumulator(string name, int weight, int seconds, long start, bool measureExecutions = true)
         {
             Name = name;
             Weight = weight;
-            Normal = new StatisticsAccumulator(seconds, start, true);
+            MeasureExecutions = measureExecutions;
+            Normal = new StatisticsAccumulator(seconds, start, measureExecutions);
             Tail = new StatisticsAccumulator(0, start, false);
         }
     }
@@ -292,16 +306,19 @@ internal static class MetricsProcessor
             }
 
             if (errorType != null)
+                RecordError(errorType, finishedAt);
+        }
+
+        internal void RecordError(string errorType, long finishedAt)
+        {
+            if (!_errors.TryGetValue(errorType, out ErrorBucket error))
             {
-                if (!_errors.TryGetValue(errorType, out ErrorBucket error))
-                {
-                    error = new ErrorBucket(finishedAt);
-                    _errors.Add(errorType, error);
-                }
-                ++error.Count;
-                error.FirstTimestamp = Math.Min(error.FirstTimestamp, finishedAt);
-                error.LastTimestamp = Math.Max(error.LastTimestamp, finishedAt);
+                error = new ErrorBucket(finishedAt);
+                _errors.Add(errorType, error);
             }
+            ++error.Count;
+            error.FirstTimestamp = Math.Min(error.FirstTimestamp, finishedAt);
+            error.LastTimestamp = Math.Max(error.LastTimestamp, finishedAt);
         }
 
         internal void MergeFrom(StatisticsAccumulator other)
@@ -424,7 +441,7 @@ internal static class MetricsProcessor
             };
         }
 
-        private ErrorStatistics[] BuildErrors() => _errors
+        internal ErrorStatistics[] BuildErrors() => _errors
             .OrderByDescending(entry => entry.Value.Count)
             .Select(entry => new ErrorStatistics
             {

@@ -53,7 +53,7 @@ public static class HtmlReportGenerator
     {
         ExecutionStatistics overall = result.OverallStatistics ?? new();
         TestEnvironment env = result.Environment;
-        var scenarios = (result.Scenarios ?? []).Where(s => s != null).ToArray();
+        var scenarios = (result.Scenarios ?? []).Where(s => s?.MeasureScenario == true).ToArray();
         var warnings = (result.Warnings ?? []).Where(w => w != null)
             .Select(w => new { code = w.DisplayCode, message = w.Message }).ToArray();
         GCPause[] pauses = (result.GcPauses ?? []).ToArray();
@@ -76,15 +76,14 @@ public static class HtmlReportGenerator
                 stats = ToStatistics(s.Statistics),
                 timeline = ToTimeline(s.Statistics?.Timeline)
             }).ToArray(),
-            errors = scenarios.SelectMany(s => (s.Statistics?.Errors ?? [])
-                .Select(e => new
-                {
-                    scenario = s.Name ?? "(unnamed)",
-                    type = e.ExceptionType ?? "Unknown",
-                    count = e.Count,
-                    firstSeconds = e.FirstOccurrence.TotalSeconds,
-                    lastSeconds = e.LastOccurrence.TotalSeconds
-                })).ToArray(),
+            errors = result.GetScenarioErrors().Select(row => new
+            {
+                scenario = (row.Name ?? "(unnamed)") + (row.IsTail ? " (completion tail)" : string.Empty),
+                type = row.Error.ExceptionType ?? "Unknown",
+                count = row.Error.Count,
+                firstSeconds = row.Error.FirstOccurrence.TotalSeconds,
+                lastSeconds = row.Error.LastOccurrence.TotalSeconds
+            }).ToArray(),
             topFast = ToSamples(overall.Latency?.Top5Min),
             topSlow = ToSamples(overall.Latency?.Top5Max),
             excludedCompletions = result.CompletionTail?.TotalCount ?? 0,

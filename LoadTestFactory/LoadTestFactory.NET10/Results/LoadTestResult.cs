@@ -114,7 +114,7 @@ public sealed class LoadTestResult
         {
             foreach (ScenarioResult scenario in Scenarios)
             {
-                if (scenario == null)
+                if (scenario?.MeasureScenario != true)
                     continue;
 
                 ExecutionStatistics stats = scenario.Statistics ?? new();
@@ -168,24 +168,16 @@ public sealed class LoadTestResult
             AppendTable(sb, "MEASURED CALLS (latency in ms)", callHeaders, callRows, widths);
 
         bool hasErrors = false;
-        if (Scenarios != null)
+        foreach (var (name, error, isTail) in GetScenarioErrors())
         {
-            foreach (ScenarioResult scenario in Scenarios)
+            if (!hasErrors)
             {
-                if (scenario?.Statistics?.Errors == null)
-                    continue;
-
-                foreach (ErrorStatistics error in scenario.Statistics.Errors)
-                {
-                    if (!hasErrors)
-                    {
-                        sb.AppendLine();
-                        sb.AppendLine("ERRORS BY SCENARIO");
-                        hasErrors = true;
-                    }
-                    sb.AppendLine($"  {scenario.Name}: {error.ExceptionType} ({error.Count:N0})");
-                }
+                sb.AppendLine();
+                sb.AppendLine("ERRORS BY SCENARIO");
+                hasErrors = true;
             }
+            string phase = isTail ? " (completion tail)" : string.Empty;
+            sb.AppendLine($"  {name}{phase}: {error.ExceptionType} ({error.Count:N0})");
         }
 
         long gcDurationMs = 0;
@@ -226,6 +218,21 @@ public sealed class LoadTestResult
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    internal IEnumerable<(string Name, ErrorStatistics Error, bool IsTail)> GetScenarioErrors()
+    {
+        foreach (ScenarioResult scenario in Scenarios ?? [])
+        {
+            if (scenario == null)
+                continue;
+
+            foreach (ErrorStatistics error in scenario.Statistics?.Errors ?? [])
+                yield return (scenario.Name, error, false);
+
+            foreach (ErrorStatistics error in scenario.CompletionTail?.Errors ?? [])
+                yield return (scenario.Name, error, true);
+        }
     }
 
     private static void AppendMetric(StringBuilder sb, string label, string value)

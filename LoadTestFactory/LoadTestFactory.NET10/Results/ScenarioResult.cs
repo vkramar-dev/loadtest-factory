@@ -9,6 +9,9 @@ public sealed class ScenarioResult
     /// <summary>Gets the configured weight of the scenario.</summary>
     public int Weight { get; init; }
 
+    /// <summary>Gets whether this scenario contributes execution, throughput and latency statistics.</summary>
+    public bool MeasureScenario { get; init; } = true;
+
     /// <summary>Gets the execution statistics for the scenario.</summary>
     public ExecutionStatistics Statistics { get; init; } = new();
 

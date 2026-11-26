@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Client/Client.csproj" Id="44092180-5cfe-48db-a288-37c47de6b7de" />
+  <Project Path="LoadTestFactory.NET10.Tests/LoadTestFactory.NET10.Tests.csproj" />
   <Project Path="LoadTestFactory.NET10/LoadTestFactory.NET10.csproj" />
 </Solution>

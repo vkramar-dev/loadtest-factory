@@ -55,7 +55,7 @@ static TestScenario CreateScenario2(string name, int weight)
     {
         await Task.Delay(0);
 
-        MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));                 
+        MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
 
         MeasuredCall.AsyncRun("test-002", () => Task.Delay(1));
 
