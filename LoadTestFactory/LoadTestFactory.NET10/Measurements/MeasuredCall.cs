@@ -11,8 +11,7 @@ public static class MeasuredCall
 
     public static async Task AsyncRun(string name, Func<Task> testCallHandler)
     {
-        int scenarioId = IdResolver.GetOrAdd(
-            name, static _ => Interlocked.Increment(ref IdCounter));
+        int callId = IdResolver.GetOrAdd(name, static _ => Interlocked.Increment(ref IdCounter));
 
         MetricsCollector collector = MetricsCollector.Current.Value;
         if (collector == null)
@@ -23,19 +22,28 @@ public static class MeasuredCall
 
         long start = Stopwatch.GetTimestamp();
 
-        await testCallHandler();
+        try
+        {
+            await testCallHandler();
+        }
+        catch (Exception ex)
+        {
+            long elapsed = Stopwatch.GetTimestamp() - start;
+            Measurement error = new(callId, start, elapsed);
+            collector.AddMeasurementWithError(ref error, ex.GetType().Name);
+
+            throw;
+        }
 
         long completionTimestamp = Stopwatch.GetTimestamp();
         long elapsedTicks = completionTimestamp - start;
-        Measurement newMeasurement = new(scenarioId, start, elapsedTicks);
-
+        Measurement newMeasurement = new(callId, start, elapsedTicks);
         collector.AddMeasurement(ref newMeasurement);
     }
 
     public static async Task<T> AsyncRun<T>(string name, Func<Task<T>> testCallHandler)
     {
-        int scenarioId = IdResolver.GetOrAdd(
-            name, static _ => Interlocked.Increment(ref IdCounter));
+        int callId = IdResolver.GetOrAdd(name, static _ => Interlocked.Increment(ref IdCounter));
 
         MetricsCollector collector = MetricsCollector.Current.Value;
         if (collector == null)
@@ -43,13 +51,25 @@ public static class MeasuredCall
             return await testCallHandler();
         }
 
+        T result;
         long start = Stopwatch.GetTimestamp();
+        
+        try
+        {
+            result = await testCallHandler();
+        }
+        catch (Exception ex)
+        {
+            long elapsed = Stopwatch.GetTimestamp() - start;
+            Measurement error = new(callId, start, elapsed);
+            collector.AddMeasurementWithError(ref error, ex.GetType().Name);
 
-        T result = await testCallHandler();
+            throw;
+        }
 
         long completionTimestamp = Stopwatch.GetTimestamp();
         long elapsedTicks = completionTimestamp - start;
-        Measurement newMeasurement = new(scenarioId, start, elapsedTicks);
+        Measurement newMeasurement = new(callId, start, elapsedTicks);
 
         collector.AddMeasurement(ref newMeasurement);
 
