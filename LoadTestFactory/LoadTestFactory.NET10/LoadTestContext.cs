@@ -36,6 +36,7 @@ internal static class GlobalState
 internal sealed class LoadTestContext<T>
 {
     int ParallelAmount;
+    T[] ParallelContexts;
     int WarmupInSeconds;
     int DurationInSeconds;
     TestScenario<T>[] Scenarios;
@@ -61,7 +62,7 @@ internal sealed class LoadTestContext<T>
     LoadTestResult Result;
 
     internal LoadTestContext(
-        int parallelAmount,
+        T[] parallelContexts,
         int warmupInSeconds,
         int durationInSeconds,
         TestScenario<T>[] scenarios,
@@ -69,7 +70,8 @@ internal sealed class LoadTestContext<T>
         bool consoleOutput,
         CancellationToken cancellationToken)
     {
-        ParallelAmount = parallelAmount;
+        ParallelContexts = parallelContexts;
+        ParallelAmount = parallelContexts.Length;
         WarmupInSeconds = warmupInSeconds;
         DurationInSeconds = durationInSeconds;
         Scenarios = scenarios;
@@ -80,7 +82,7 @@ internal sealed class LoadTestContext<T>
 
     internal void InitializeAndStartApp()
     {
-        ValidateParams(ParallelAmount, WarmupInSeconds, DurationInSeconds, Scenarios, WorkingDirectory);
+        ValidateParams(ParallelContexts, WarmupInSeconds, DurationInSeconds, Scenarios, WorkingDirectory);
 
         GlobalState.SetPathToFolder(GetPathToFolder(WorkingDirectory));
 
@@ -109,7 +111,7 @@ internal sealed class LoadTestContext<T>
     }
 
     private void ValidateParams(
-        int parallelAmount,
+        T[] parallelContexts,
         int warmupInSeconds,
         int durationInSeconds,
         TestScenario<T>[] scenarios,
@@ -117,7 +119,8 @@ internal sealed class LoadTestContext<T>
     {
         const int MaxDurationInSeconds = 24 * 60 * 60;
 
-        ArgumentOutOfRangeException.ThrowIfLessThan(parallelAmount, 1);
+        ArgumentNullException.ThrowIfNull(parallelContexts);
+        ArgumentOutOfRangeException.ThrowIfLessThan(parallelContexts.Length, 1, nameof(parallelContexts));
 
         ArgumentOutOfRangeException.ThrowIfNegative(warmupInSeconds);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(warmupInSeconds, MaxDurationInSeconds);
@@ -367,5 +370,29 @@ internal sealed class LoadTestContext<T>
         }
 
         GCPauseCollector?.Dispose();
+    }
+
+    internal static int[] GetDelaysForEachParallel(
+        int parallelAmount, int stepAmount, int testDurationInSeconds)
+    {
+        int[] delays = new int[parallelAmount];
+
+        int oneStep = parallelAmount / stepAmount;
+        int oneStepSeconds = testDurationInSeconds / stepAmount;
+
+        for (int step = 0, delay = 0; step < stepAmount; ++step, delay += oneStepSeconds)
+        {
+            int start = step * oneStep;
+            int end = step == stepAmount - 1
+                ? parallelAmount
+                : start + oneStep;
+
+            for (int j = start; j < end; ++j)
+            {
+                delays[j] = delay;
+            }
+        }
+
+        return delays;
     }
 }

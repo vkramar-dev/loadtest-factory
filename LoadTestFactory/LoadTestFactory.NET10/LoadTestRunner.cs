@@ -26,7 +26,7 @@ public static class LoadTestRunner
     }
 
     public static async Task<LoadTestResult> RunAsync<T>(
-        T[] contexts,
+        T[] parallelContexts,
         int warmupInSeconds,
         int durationInSeconds,
         TestScenario<T>[] scenarios,
@@ -34,13 +34,9 @@ public static class LoadTestRunner
         bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(contexts);
-        int parallelAmount = contexts.Length;
-        ArgumentOutOfRangeException.ThrowIfLessThan(parallelAmount, 1, nameof(contexts));
-
         GlobalState.CaptureState();
 
-        LoadTestContext<T> ctx = new LoadTestContext<T>(parallelAmount, warmupInSeconds, durationInSeconds,
+        LoadTestContext<T> ctx = new LoadTestContext<T>(parallelContexts, warmupInSeconds, durationInSeconds,
                 scenarios, workingDirectory, consoleOutput, cancellationToken);
 
         try
@@ -57,13 +53,13 @@ public static class LoadTestRunner
 
             ParallelOptions options = new()
             {
-                MaxDegreeOfParallelism = parallelAmount,
+                MaxDegreeOfParallelism = parallelContexts.Length,
                 CancellationToken = cancellationToken,
             };
 
-            await Parallel.ForAsync<int>(0, parallelAmount, options, async (i, ct) =>
+            await Parallel.ForAsync<int>(0, parallelContexts.Length, options, async (i, ct) =>
             {
-                T context = contexts[i];
+                T context = parallelContexts[i];
                 var iterator = ctx.ScenariosCircle.GetIterator();
 
                 while (!ct.IsCancellationRequested)
@@ -106,6 +102,113 @@ public static class LoadTestRunner
             ctx.SaveReportResult();
 
             return result;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Write(ex, GlobalState.PathToFolder ?? workingDirectory);
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await ctx.CleanUp();
+            }
+            finally
+            {
+                GlobalState.ReleaseState();
+            }
+        }
+    }
+
+    public static async Task<SteppedLoadTestResult> RunSteppedLoadAsync<T>(
+        T[] parallelContexts,
+        int warmupInSeconds,
+        int durationInSeconds,
+        int stepAmount,
+        TestScenario<T>[] scenarios,
+        string workingDirectory = null,
+        bool consoleOutput = true,
+        CancellationToken cancellationToken = default)
+    {
+        GlobalState.CaptureState();
+
+        LoadTestContext<T> ctx = new LoadTestContext<T>(parallelContexts, warmupInSeconds, durationInSeconds,
+                scenarios, workingDirectory, consoleOutput, cancellationToken);
+
+        try
+        {
+            ctx.InitializeAndStartApp();
+
+            ctx.StartMonitoringGC();
+
+            ctx.CalibrateTimestamps();
+            long measurementStartTimestamp = ctx.MeasurementStartTimestamp;
+            long measurementEndTimestamp = ctx.MeasurementEndTimestamp;
+
+            ctx.StartProgressMonitor();
+
+            int[] delays = LoadTestContext<T>.GetDelaysForEachParallel(
+                parallelContexts.Length, stepAmount, durationInSeconds);
+
+            ParallelOptions options = new()
+            {
+                MaxDegreeOfParallelism = parallelContexts.Length,
+                CancellationToken = cancellationToken,
+            };
+
+            await Parallel.ForAsync<int>(0, parallelContexts.Length, options, async (i, ct) =>
+            {
+                T context = parallelContexts[i];
+                var iterator = ctx.ScenariosCircle.GetIterator();
+
+                while (!ct.IsCancellationRequested)
+                {
+                    if (Stopwatch.GetTimestamp() >= measurementStartTimestamp)
+                        break;
+
+                    TestScenario<T> scenario = iterator.Next();
+                    await scenario.ExecuteSafeAsync(context);
+                }
+
+                MetricsCollector currentCollector = ctx.Collectors[i];
+                MetricsCollector.Current.Value = currentCollector;
+
+                long activationTimestamp = measurementStartTimestamp + delays[i] * Stopwatch.Frequency;
+
+                long remainingTicks = activationTimestamp - Stopwatch.GetTimestamp();
+
+                if (remainingTicks > 0)
+                {
+                    await Task.Delay(
+                        TimeSpan.FromSeconds((double)remainingTicks / Stopwatch.Frequency),
+                        ct);
+                }
+
+                while (!ct.IsCancellationRequested)
+                {
+                    if (Stopwatch.GetTimestamp() >= measurementEndTimestamp)
+                        break;
+
+                    TestScenario<T> scenario = iterator.Next();
+                    await scenario.ExecuteMeasuredAsync(context, currentCollector, measurementEndTimestamp);
+                }
+            });
+
+            // Workers are finished. A completion after the configured measurement
+            // end is stored in CompletionTail, not the normal statistics.
+            await ctx.ProgressMonitor.CompleteAsync();
+
+            GCPause[] pauses = ctx.GetGCPauses();
+            ctx.ProgressMonitor = null; // CompleteAsync already disposed its timer.
+
+            ctx.AddWarningsIfExists();
+
+            await ctx.CompleteCollectors();
+
+            // TODO:
+
+            return new SteppedLoadTestResult();
         }
         catch (Exception ex)
         {
