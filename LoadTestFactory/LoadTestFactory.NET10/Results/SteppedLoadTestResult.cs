@@ -60,13 +60,6 @@ public sealed class SteppedLoadTestResult
         sb.AppendLine("STEPPED LOAD TEST RESULTS:");
         sb.AppendLine(new string('-', 60));
         sb.AppendLine($"Maximum workers: {ParallelAmount:N0} | Steps: {StepAmount:N0} | Duration: {MeasurementDuration.TotalSeconds:N0} sec");
-        sb.AppendLine("Stabilization: first 20% of each step.");
-        sb.AppendLine("Statistics include only operations starting and finishing inside the same stable window.");
-
-        AppendTable(sb, "LOAD STEPS", ["Step", "Workers", "Duration(s)", "Stabilize(s)", "Measure(s)"],
-            Steps.Select(step => new[] { step.StepNumber.ToString(), step.ParallelAmount.ToString("N0"),
-                step.Duration.TotalSeconds.ToString("N0"), step.StabilizationDuration.TotalSeconds.ToString("0.###"),
-                step.MeasurementDuration.TotalSeconds.ToString("0.###") }));
 
         if (Steps.Any(step => step.Scenarios.Any(s => s.MeasureScenario)))
             AppendStatistics(sb, "OVERALL (latency in ms)",
@@ -93,17 +86,6 @@ public sealed class SteppedLoadTestResult
             AppendStatistics(sb, $"MEASURED CALL: {name} (latency in ms)",
                 Steps.Select(step => (step.ParallelAmount, step.MeasuredCalls.FirstOrDefault(c => c.Name == name)?.Statistics)), false);
         }
-
-        if (Steps.Any(step => step.CompletionTail.TotalCount > 0 || step.MeasuredCalls.Any(c => c.CompletionTail.TotalCount > 0)))
-            AppendTable(sb, "COMPLETION TAIL (stable-window operations crossing the step end; final tail included)",
-                ["Workers", "Scenarios", "Measured calls"], Steps.Select(step => new[] {
-                    step.ParallelAmount.ToString("N0"), step.CompletionTail.TotalCount.ToString("N0"),
-                    step.MeasuredCalls.Sum(c => c.CompletionTail.TotalCount).ToString("N0") }));
-
-        if (Steps.Any(step => step.StabilizationScenarioCount > 0 || step.StabilizationMeasuredCallCount > 0))
-            AppendTable(sb, "STABILIZATION (excluded operations)", ["Workers", "Scenarios", "Measured calls"],
-                Steps.Select(step => new[] { step.ParallelAmount.ToString("N0"),
-                    step.StabilizationScenarioCount.ToString("N0"), step.StabilizationMeasuredCallCount.ToString("N0") }));
 
         bool hasErrors = false;
         foreach (var step in Steps)

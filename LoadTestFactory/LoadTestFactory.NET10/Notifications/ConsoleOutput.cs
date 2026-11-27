@@ -84,8 +84,6 @@ internal static class ConsoleOutput
                 WriteMetric("Test type:", "Stepped Load");
                 WriteMetric("Steps:", count.ToString("N0"));
                 WriteMetric("Step duration:", $"{durationSeconds / count} seconds (+ remainder on last step)");
-                WriteMetric("Stabilization:", "20% of each step");
-                Console.WriteLine("Live progress includes stabilization; final tables exclude it.");
             }
             Separator();
             WriteWarnings(warnings);
