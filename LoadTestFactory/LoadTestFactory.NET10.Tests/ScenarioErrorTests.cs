@@ -1,4 +1,3 @@
-using LoadTestFactory.Measurements;
 using LoadTestFactory.Utilities;
 
 namespace LoadTestFactory.Tests;

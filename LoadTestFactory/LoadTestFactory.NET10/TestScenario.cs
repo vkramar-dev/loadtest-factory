@@ -11,15 +11,20 @@ public sealed class TestScenario<T>
         MeasureScenario = measureScenario;
     }
 
-    public int Id { get; set; }
+    public int Id { get; init; }
 
-    public string Name { get; set; }
+    public string Name { get; init; }
 
-    public int Weight { get; set; }
+    public int Weight { get; private set; }
 
-    public TestHandler<T> MethodHandler { get; set; }
+    public TestHandler<T> MethodHandler { get; init; }
 
-    public bool MeasureScenario { get; set; }
+    public bool MeasureScenario { get; init; }
+
+    public void ReduceWeight(int divisor)
+    {
+        Weight /= divisor;
+    }
 }
 
 internal static class ScenarioIdGenerator

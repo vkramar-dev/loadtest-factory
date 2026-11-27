@@ -31,7 +31,7 @@ public sealed class FullyFragmentedTestScenarioCircle<T>
         if (gcd > 1)
         {
             for (int i = 0; i < scenarios.Length; ++i)
-                scenarios[i].Weight /= gcd;
+                scenarios[i].ReduceWeight(gcd);
         }
 
         return scenarios;

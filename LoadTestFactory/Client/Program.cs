@@ -1,5 +1,4 @@
 ﻿using LoadTestFactory;
-using LoadTestFactory.Measurements;
 using LoadTestFactory.Results;
 
 //TestScenario<int>[] tests = new TestScenario<int>[]

@@ -1,6 +1,6 @@
 ﻿using System.Collections.Concurrent;
 
-namespace LoadTestFactory.Measurements;
+namespace LoadTestFactory;
 
 public static class MeasuredCall
 {
