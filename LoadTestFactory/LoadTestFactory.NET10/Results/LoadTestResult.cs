@@ -167,6 +167,18 @@ public sealed class LoadTestResult
         if (hasMeasuredCalls)
             AppendTable(sb, "MEASURED CALLS (latency in ms)", callHeaders, callRows, widths);
 
+        long scenarioTailCount = CompletionTail?.TotalCount ?? 0;
+        long measuredCallTailCount = MeasuredCalls?.Sum(call => call?.CompletionTail?.TotalCount ?? 0) ?? 0;
+
+        if (scenarioTailCount > 0 || measuredCallTailCount > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("COMPLETION TAIL");
+            sb.AppendLine(new string('-', 60));
+            sb.AppendLine($"{"Scenarios completed after measurement window:",-52}{scenarioTailCount,8:N0}");
+            sb.AppendLine($"{"Measured calls completed after measurement window:",-52}{measuredCallTailCount,8:N0}");
+        }
+
         bool hasErrors = false;
         foreach (var (name, error, isTail) in GetScenarioErrors())
         {
