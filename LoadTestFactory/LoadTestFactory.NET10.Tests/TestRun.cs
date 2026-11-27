@@ -22,14 +22,14 @@ internal sealed class TestRun : IDisposable
         MetricsCollector.Current.Value = Collector;
     }
 
-    public Task<MetricsProcessingResult> ReadAsync(params TestScenario[] scenarios)
+    public Task<MetricsProcessingResult> ReadAsync(params TestScenario<int>[] scenarios)
     {
         // Include all calls just made, even if a debugger or the scheduler paused a test.
         int seconds = checked((int)((Stopwatch.GetTimestamp() - Start) / Stopwatch.Frequency) + 1);
         return ReadWindowAsync(seconds, scenarios);
     }
 
-    public Task<MetricsProcessingResult> ReadWindowAsync(int seconds, params TestScenario[] scenarios)
+    public Task<MetricsProcessingResult> ReadWindowAsync(int seconds, params TestScenario<int>[] scenarios)
     {
         Collector.Complete();
         return MetricsProcessor.ProcessAsync([Collector], scenarios, Start,

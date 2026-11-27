@@ -1,8 +1,8 @@
 ﻿namespace LoadTestFactory.Fragmentation;
 
-class Item
+class Item<T>
 {
-    public Item(TestScenario scenario)
+    public Item(TestScenario<T> scenario)
     {
         Scenario = scenario;
         OriginalCount = scenario.Weight;
@@ -10,7 +10,7 @@ class Item
         Priority = 1M;
     }
 
-    public TestScenario Scenario;
+    public TestScenario<T> Scenario;
 
     public int OriginalCount;
 
@@ -18,7 +18,7 @@ class Item
 
     public decimal Priority;
 
-    public TestScenario TakeOne()
+    public TestScenario<T> TakeOne()
     {
         Priority = --LeftCount / (decimal)OriginalCount;
         return Scenario;

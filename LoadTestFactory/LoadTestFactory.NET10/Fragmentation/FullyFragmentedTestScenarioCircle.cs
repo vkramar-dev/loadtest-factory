@@ -1,26 +1,26 @@
 ﻿namespace LoadTestFactory.Fragmentation;
 
-public sealed class FullyFragmentedTestScenarioCircle
+public sealed class FullyFragmentedTestScenarioCircle<T>
 {
-    private readonly TestScenario[] _scenarios;
+    private readonly TestScenario<T>[] _scenarios;
 
-    public FullyFragmentedTestScenarioCircle(TestScenario[] scenarios)
+    public FullyFragmentedTestScenarioCircle(TestScenario<T>[] scenarios)
     {
-        TestScenario[] processedScenarios = ProcessScenarios(scenarios);
+        TestScenario<T>[] processedScenarios = ProcessScenarios(scenarios);
 
-        ItemFragmentator fragmentator = new (scenarios);
+        ItemFragmentator<T> fragmentator = new (scenarios);
         _scenarios = fragmentator.Fragment();
     }
 
-    public TestScenarioIterator GetIterator()
+    public TestScenarioIterator<T> GetIterator()
     {
-        return new TestScenarioIterator(_scenarios);
+        return new TestScenarioIterator<T>(_scenarios);
     }
 
-    private TestScenario[] ProcessScenarios(TestScenario[] scenarios)
+    private TestScenario<T>[] ProcessScenarios(TestScenario<T>[] scenarios)
     {
         scenarios.Sort(
-            new Comparison<TestScenario>((left, right) => right.Weight - left.Weight));
+            new Comparison<TestScenario<T>>((left, right) => right.Weight - left.Weight));
 
         var weights = scenarios
             .Select(s => s.Weight)

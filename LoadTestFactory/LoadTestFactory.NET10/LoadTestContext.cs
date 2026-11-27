@@ -8,37 +8,37 @@ using System.Text;
 
 namespace LoadTestFactory;
 
-internal sealed class LoadTestContext
+internal static class GlobalState
 {
-    public static class GlobalState
+    public static string PathToFolder { get; private set; }
+
+    private static int _state;
+
+    public static void CaptureState()
     {
-        public static string PathToFolder { get; private set; }
-
-        private static int _state;
-
-        public static void CaptureState()
-        {
-            if (Interlocked.CompareExchange(ref _state, 1, 0) != 0)
-                throw new InvalidOperationException(
-                    "Another load test is already running.");
-        }
-
-        public static void SetPathToFolder(string pathToFolder)
-        {
-            PathToFolder = pathToFolder;
-        }
-
-        public static void ReleaseState()
-        {
-            PathToFolder = null;
-            Interlocked.Exchange(ref _state, 0);
-        }
+        if (Interlocked.CompareExchange(ref _state, 1, 0) != 0)
+            throw new InvalidOperationException(
+                "Another load test is already running.");
     }
 
+    public static void SetPathToFolder(string pathToFolder)
+    {
+        PathToFolder = pathToFolder;
+    }
+
+    public static void ReleaseState()
+    {
+        PathToFolder = null;
+        Interlocked.Exchange(ref _state, 0);
+    }
+}
+
+internal sealed class LoadTestContext<T>
+{
     int ParallelAmount;
     int WarmupInSeconds;
     int DurationInSeconds;
-    TestScenario[] Scenarios;
+    TestScenario<T>[] Scenarios;
     string WorkingDirectory;
     bool IsConsoleOutput;
     CancellationToken CancellationToken;
@@ -46,7 +46,7 @@ internal sealed class LoadTestContext
     internal LoadTestWarning[] StartupWarning;
     internal TestEnvironment TestEnvironment;
     internal MetricsCollector[] Collectors;
-    internal FullyFragmentedTestScenarioCircle ScenariosCircle;
+    internal FullyFragmentedTestScenarioCircle<T> ScenariosCircle;
     internal GCPauseCollector GCPauseCollector;
     internal DateTime ClockAnchorUtc;
     internal LoadTestProgressMonitor ProgressMonitor;
@@ -64,7 +64,7 @@ internal sealed class LoadTestContext
         int parallelAmount,
         int warmupInSeconds,
         int durationInSeconds,
-        TestScenario[] scenarios,
+        TestScenario<T>[] scenarios,
         string workingDirectory,
         bool consoleOutput,
         CancellationToken cancellationToken)
@@ -105,14 +105,14 @@ internal sealed class LoadTestContext
         for (int i = 0; i < ParallelAmount; ++i)
             Collectors[i] = new MetricsCollector(i, GlobalState.PathToFolder);
 
-        ScenariosCircle = new FullyFragmentedTestScenarioCircle(Scenarios);
+        ScenariosCircle = new FullyFragmentedTestScenarioCircle<T>(Scenarios);
     }
 
     private void ValidateParams(
         int parallelAmount,
         int warmupInSeconds,
         int durationInSeconds,
-        TestScenario[] scenarios,
+        TestScenario<T>[] scenarios,
         string workingDirectory = null)
     {
         const int MaxDurationInSeconds = 24 * 60 * 60;

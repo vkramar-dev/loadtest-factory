@@ -2,7 +2,6 @@ using LoadTestFactory.Metrics;
 using LoadTestFactory.Notifications;
 using LoadTestFactory.Reports;
 using System.Diagnostics;
-using static LoadTestFactory.LoadTestContext;
 
 namespace LoadTestFactory;
 
@@ -10,37 +9,41 @@ public static class LoadTestRunner
 {
     public static event EventHandler<LoadTestProgressEventArgs> ProgressChanged;
 
-    public static Task<LoadTestResult> RunAsync(
-        int parallelAmount,
+    public static Task<LoadTestResult> RunAsync<T>(
+        T[] contexts,
         int warmupInSeconds,
         int durationInSeconds,
-        TestHandler scenario,
+        TestHandler<T> scenario,
         string workingDirectory = null,
         bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
         return LoadTestRunner.RunAsync(
-            parallelAmount,
+            contexts,
             warmupInSeconds,
             durationInSeconds,
-            new TestScenario[] { new TestScenario("Test Scenario", 1, scenario) },
+            new TestScenario<T>[] { new TestScenario<T>("Test Scenario", 1, scenario) },
             workingDirectory,
             consoleOutput,
             cancellationToken);
     }
 
-    public static async Task<LoadTestResult> RunAsync(
-        int parallelAmount,
+    public static async Task<LoadTestResult> RunAsync<T>(
+        T[] contexts,
         int warmupInSeconds,
         int durationInSeconds,
-        TestScenario[] scenarios,
+        TestScenario<T>[] scenarios,
         string workingDirectory = null,
         bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(contexts);
+        int parallelAmount = contexts.Length;
+        ArgumentOutOfRangeException.ThrowIfLessThan(parallelAmount, 1, nameof(contexts));
+
         GlobalState.CaptureState();
 
-        LoadTestContext ctx = new LoadTestContext(parallelAmount, warmupInSeconds, durationInSeconds,
+        LoadTestContext<T> ctx = new LoadTestContext<T>(parallelAmount, warmupInSeconds, durationInSeconds,
                 scenarios, workingDirectory, consoleOutput, cancellationToken);
 
         try
@@ -63,6 +66,7 @@ public static class LoadTestRunner
 
             await Parallel.ForAsync<int>(0, parallelAmount, options, async (i, ct) =>
             {
+                T context = contexts[i];
                 var iterator = ctx.ScenariosCircle.GetIterator();
 
                 while (!ct.IsCancellationRequested)
@@ -70,8 +74,8 @@ public static class LoadTestRunner
                     if (Stopwatch.GetTimestamp() >= measurementStartTimestamp)
                         break;
 
-                    TestScenario scenario = iterator.Next();
-                    await scenario.ExecuteSafeAsync();
+                    TestScenario<T> scenario = iterator.Next();
+                    await scenario.ExecuteSafeAsync(context);
                 }
 
                 MetricsCollector currentCollector = ctx.Collectors[i];
@@ -82,8 +86,8 @@ public static class LoadTestRunner
                     if (Stopwatch.GetTimestamp() >= measurementEndTimestamp)
                         break;
 
-                    TestScenario scenario = iterator.Next();
-                    await scenario.ExecuteMeasuredAsync(currentCollector, measurementEndTimestamp);
+                    TestScenario<T> scenario = iterator.Next();
+                    await scenario.ExecuteMeasuredAsync(context, currentCollector, measurementEndTimestamp);
                 }
             });
 
@@ -113,8 +117,14 @@ public static class LoadTestRunner
         }
         finally
         {
-            GlobalState.ReleaseState();
-            await ctx.CleanUp();
+            try
+            {
+                await ctx.CleanUp();
+            }
+            finally
+            {
+                GlobalState.ReleaseState();
+            }
         }
     }
 

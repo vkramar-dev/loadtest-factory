@@ -21,9 +21,9 @@ internal static class MetricsProcessor
     private const int MeasurementsPerChunk = 262_144;
     private const int ChunkBytes = MeasurementsPerChunk * 24;
 
-    internal static async Task<MetricsProcessingResult> ProcessAsync(
+    internal static async Task<MetricsProcessingResult> ProcessAsync<T>(
         MetricsCollector[] collectors,
-        TestScenario[] scenarios,
+        TestScenario<T>[] scenarios,
         long measurementStartTimestamp,
         long measurementEndTimestamp,
         int measurementSeconds,
@@ -36,7 +36,7 @@ internal static class MetricsProcessor
 
         for (int i = 0; i < scenarios.Length; ++i)
         {
-            TestScenario scenario = scenarios[i];
+            TestScenario<T> scenario = scenarios[i];
             ScenarioAccumulator stats = new(scenario.Name, scenario.Weight, measurementSeconds,
                 measurementStartTimestamp, scenario.MeasureScenario);
             if (!byId.TryAdd(scenario.Id, stats))

@@ -2,7 +2,7 @@
 using LoadTestFactory.Measurements;
 using LoadTestFactory.Results;
 
-//TestScenario[] tests = new TestScenario[]
+//TestScenario<int>[] tests = new TestScenario<int>[]
 //{
 //    CreateScenario("A", 20),
 //    CreateScenario("B", 7),
@@ -11,7 +11,7 @@ using LoadTestFactory.Results;
 //    CreateScenario("E", 2)
 //};
 
-TestScenario[] tests = new TestScenario[]
+TestScenario<int>[] tests = new TestScenario<int>[]
 {
     CreateScenario2("A", 73),
     CreateScenario3("B", 31),
@@ -30,18 +30,18 @@ TestScenario[] tests = new TestScenario[]
     CreateScenario3("test-001", 1)
 };
 
-LoadTestResult result = await LoadTestRunner.RunAsync(16, 20, 20, tests);
+LoadTestResult result = await LoadTestRunner.RunAsync(Enumerable.Range(0, 16).ToArray(), 20, 20, tests);
 
 
-static TestScenario CreateScenario(string name, int weight)
+static TestScenario<int> CreateScenario(string name, int weight)
 {
-    return new TestScenario(name, weight, async (name) =>
+    return new TestScenario<int>(name, weight, async (context) =>
         {
             await Task.Delay(0);
 
-            throw new InvalidCastException();
+            //throw new InvalidCastException();
 
-            MeasuredCall.AsyncRun("test-001", () => { Task.Delay(1); throw new ApplicationException(); });
+            await MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
 
             await Task.Delay(0);
             //await Task.CompletedTask;
@@ -49,17 +49,17 @@ static TestScenario CreateScenario(string name, int weight)
     );
 }
 
-static TestScenario CreateScenario2(string name, int weight)
+static TestScenario<int> CreateScenario2(string name, int weight)
 {
-    return new TestScenario(name, weight, async (name) =>
+    return new TestScenario<int>(name, weight, async (context) =>
     {
         await Task.Delay(0);
 
-        MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
+        await MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
 
-        MeasuredCall.AsyncRun("test-002", () => Task.Delay(1));
+        await MeasuredCall.AsyncRun("test-002", () => Task.Delay(1));
 
-        MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
+        await MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
 
         await Task.Delay(0);
 
@@ -69,9 +69,9 @@ static TestScenario CreateScenario2(string name, int weight)
     );
 }
 
-static TestScenario CreateScenario3(string name, int weight)
+static TestScenario<int> CreateScenario3(string name, int weight)
 {
-    return new TestScenario(name, weight, async (name) =>
+    return new TestScenario<int>(name, weight, async (context) =>
     {
         await Task.WhenAll(
     Task.Run(async () =>

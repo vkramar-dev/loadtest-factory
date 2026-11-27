@@ -12,8 +12,8 @@ public class MetricsProcessorTests
     public async Task Unmeasured_errors_are_grouped_by_time_window_and_excluded_from_performance()
     {
         using var run = new TestRun();
-        var measured = new TestScenario("measured", 1, _ => Task.CompletedTask);
-        var hidden = new TestScenario("errors-only", 1, _ => Task.CompletedTask, measureScenario: false);
+        var measured = new TestScenario<int>("measured", 1, _ => Task.CompletedTask);
+        var hidden = new TestScenario<int>("errors-only", 1, _ => Task.CompletedTask, measureScenario: false);
         long second = Stopwatch.Frequency;
         var ok = new Measurement(measured.Id, run.Start, second / 2);
         run.Collector.AddMeasurement(ref ok);
@@ -90,7 +90,7 @@ public class MetricsProcessorTests
     public async Task Zero_tick_latency_is_valid_for_a_measured_execution()
     {
         using var run = new TestRun();
-        var scenario = new TestScenario("fast", 1, _ => Task.CompletedTask);
+        var scenario = new TestScenario<int>("fast", 1, _ => Task.CompletedTask);
         var sample = new Measurement(scenario.Id, run.Start, 0);
         run.Collector.AddMeasurement(ref sample);
         var metrics = await run.ReadWindowAsync(1, scenario);
@@ -104,7 +104,7 @@ public class MetricsProcessorTests
     public async Task Corrupt_timestamp_and_unknown_id_still_fail_validation(bool invalidTime)
     {
         using var run = new TestRun();
-        var scenario = new TestScenario("valid", 1, _ => Task.CompletedTask);
+        var scenario = new TestScenario<int>("valid", 1, _ => Task.CompletedTask);
         var sample = new Measurement(invalidTime ? scenario.Id : int.MaxValue, invalidTime ? 0 : run.Start, 0);
         run.Collector.AddMeasurement(ref sample);
         var ex = await Assert.ThrowsAsync<InvalidDataException>(() => run.ReadWindowAsync(1, scenario));

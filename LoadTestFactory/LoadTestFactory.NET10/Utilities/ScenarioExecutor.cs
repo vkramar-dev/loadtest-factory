@@ -4,11 +4,11 @@ namespace LoadTestFactory.Utilities;
 
 internal static class ScenarioExecutor
 {
-    internal static async Task<Exception> ExecuteSafeAsync(this TestScenario scenario)
+    internal static async Task<Exception> ExecuteSafeAsync<T>(this TestScenario<T> scenario, T context)
     {
         try
         {
-            await scenario.MethodHandler(scenario.Name);
+            await scenario.MethodHandler(context);
             return null;
         }
         catch(Exception ex)
@@ -17,14 +17,15 @@ internal static class ScenarioExecutor
         }
     }
 
-    internal static async Task ExecuteMeasuredAsync(
-        this TestScenario scenario,
+    internal static async Task ExecuteMeasuredAsync<T>(
+        this TestScenario<T> scenario,
+        T context,
         MetricsCollector collector,
         long measurementEndTimestamp)
     {
         if (!scenario.MeasureScenario)
         {
-            Exception ex = await scenario.ExecuteSafeAsync();
+            Exception ex = await scenario.ExecuteSafeAsync(context);
             if (ex != null)
             {
                 Measurement errorMeasure = new(scenario.Id, Stopwatch.GetTimestamp(), 0);
@@ -35,7 +36,7 @@ internal static class ScenarioExecutor
 
         long start = Stopwatch.GetTimestamp();
 
-        Exception error = await scenario.ExecuteSafeAsync();
+        Exception error = await scenario.ExecuteSafeAsync(context);
 
         long completionTimestamp = Stopwatch.GetTimestamp();
         long elapsedTicks = completionTimestamp - start;

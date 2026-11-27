@@ -12,15 +12,15 @@ public class ScenarioErrorTests
     {
         using var run = new TestRun();
         int callAttempts = 0;
-        async Task Handler(string name)
+        async Task Handler(int context)
         {
             await Task.FromException(new InvalidCastException());
             callAttempts++;
             await MeasuredCall.AsyncRun("never-reached", () => Task.CompletedTask);
         }
 
-        var scenario = new TestScenario("direct", 1, Handler, measureScenario);
-        await scenario.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        var scenario = new TestScenario<int>("direct", 1, Handler, measureScenario);
+        await scenario.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         var result = await run.ReadAsync(scenario);
         Assert.Equal(0, callAttempts);
         Assert.All(result.MeasuredCalls, c => Assert.Equal(0L, c.Statistics.TotalCount));
@@ -36,9 +36,9 @@ public class ScenarioErrorTests
     public async Task Successful_scenario_records_inner_call_in_either_mode(bool measureScenario)
     {
         using var run = new TestRun();
-        var scenario = new TestScenario("ok-outer", 1,
+        var scenario = new TestScenario<int>("ok-outer", 1,
             _ => MeasuredCall.AsyncRun("ok-inner", () => Task.CompletedTask), measureScenario);
-        await scenario.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        await scenario.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         var result = await run.ReadAsync(scenario);
         long expected = measureScenario ? 1L : 0L;
         Assert.Equal(expected, result.Overall.TotalCount);
@@ -55,13 +55,13 @@ public class ScenarioErrorTests
     {
         using var run = new TestRun();
         const string name = "same-name"; // Scenarios and calls have independent IDs.
-        var scenario = new TestScenario(name, 1, async _ =>
+        var scenario = new TestScenario<int>(name, 1, async _ =>
         {
             await MeasuredCall.AsyncRun(name, () => throw new ApplicationException());
             throw new InvalidCastException(); // Must not run after the awaited failure.
         }, measureScenario);
 
-        await scenario.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        await scenario.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         var result = await run.ReadAsync(scenario);
         long measured = measureScenario ? 1L : 0L;
         Assert.Equal(measured, run.Collector.GetCompletedExecutions());
@@ -86,7 +86,7 @@ public class ScenarioErrorTests
     {
         using var run = new TestRun();
         Task inner = null;
-        var scenario = new TestScenario("outer", 1, name =>
+        var scenario = new TestScenario<int>("outer", 1, name =>
         {
             // The handler throws synchronously: collection finishes before AsyncRun returns.
             inner = MeasuredCall.AsyncRun("unawaited", () => throw new ApplicationException());
@@ -95,7 +95,7 @@ public class ScenarioErrorTests
             return Task.CompletedTask;
         }, measureScenario: false);
 
-        await scenario.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        await scenario.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         await Assert.ThrowsAsync<ApplicationException>(() => inner);
         var result = await run.ReadAsync(scenario);
         var errors = Assert.Single(result.Scenarios).Statistics.Errors;
@@ -116,13 +116,13 @@ public class ScenarioErrorTests
     public async Task Successful_call_then_direct_scenario_failure_stays_at_its_own_level(bool measureScenario)
     {
         using var run = new TestRun();
-        var scenario = new TestScenario("outer", 1, async _ =>
+        var scenario = new TestScenario<int>("outer", 1, async _ =>
         {
             await MeasuredCall.AsyncRun("ok", () => Task.CompletedTask);
             throw new InvalidCastException();
         }, measureScenario);
 
-        await scenario.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        await scenario.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         var result = await run.ReadAsync(scenario);
         var call = Assert.Single(result.MeasuredCalls, c => c.Name == "ok");
         Assert.Equal(1L, call.Statistics.SuccessCount);
@@ -137,13 +137,13 @@ public class ScenarioErrorTests
     {
         using var run = new TestRun();
         const string call = "shared-call";
-        var measured = new TestScenario("successful", 1,
+        var measured = new TestScenario<int>("successful", 1,
             _ => MeasuredCall.AsyncRun(call, () => Task.CompletedTask));
-        var unmeasured = new TestScenario("failing", 1,
+        var unmeasured = new TestScenario<int>("failing", 1,
             _ => MeasuredCall.AsyncRun(call, () => throw new ApplicationException()), false);
 
-        await measured.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
-        await unmeasured.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        await measured.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
+        await unmeasured.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         var result = await run.ReadAsync(measured, unmeasured);
         var stats = Assert.Single(result.MeasuredCalls, c => c.Name == call).Statistics;
         Assert.Equal(2L, stats.TotalCount);
@@ -157,7 +157,7 @@ public class ScenarioErrorTests
     public async Task Scenario_can_handle_call_exception_and_finish_successfully()
     {
         using var run = new TestRun();
-        var scenario = new TestScenario("recovered", 1, async _ =>
+        var scenario = new TestScenario<int>("recovered", 1, async _ =>
         {
             try
             {
@@ -166,7 +166,7 @@ public class ScenarioErrorTests
             catch (ApplicationException) { }
         });
 
-        await scenario.ExecuteMeasuredAsync(run.Collector, long.MaxValue);
+        await scenario.ExecuteMeasuredAsync(0, run.Collector, long.MaxValue);
         var result = await run.ReadAsync(scenario);
         Assert.Equal(1L, result.Overall.SuccessCount);
         Assert.Empty(result.Overall.Errors);

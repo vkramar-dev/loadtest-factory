@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using static LoadTestFactory.LoadTestContext;
 
 namespace LoadTestFactory.Notifications;
 

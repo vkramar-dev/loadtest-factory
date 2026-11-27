@@ -1,12 +1,12 @@
 ﻿namespace LoadTestFactory.Fragmentation;
 
-public sealed class TestScenarioIterator(TestScenario[] scenarios)
+public sealed class TestScenarioIterator<T>(TestScenario<T>[] scenarios)
 {
-    readonly private TestScenario[] _scenarios = scenarios;
+    readonly private TestScenario<T>[] _scenarios = scenarios;
 
     private int _index = Random.Shared.Next(scenarios.Length);
 
-    public TestScenario Next()
+    public TestScenario<T> Next()
     {
         if (_index == _scenarios.Length)
             _index = 0;

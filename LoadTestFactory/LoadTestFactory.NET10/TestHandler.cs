@@ -1,3 +1,3 @@
 ﻿namespace LoadTestFactory;
 
-public delegate Task TestHandler(string scenarioName);
+public delegate Task TestHandler<T>(T context);

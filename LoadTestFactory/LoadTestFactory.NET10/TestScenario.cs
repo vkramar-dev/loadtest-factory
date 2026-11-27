@@ -1,15 +1,13 @@
 ﻿namespace LoadTestFactory;
 
-public sealed class TestScenario
+public sealed class TestScenario<T>
 {
-    private static int Counter = 0;
-
-    public TestScenario(string name, int weight, TestHandler methodHandler, bool measureScenario = true)
+    public TestScenario(string name, int weight, TestHandler<T> methodHandler, bool measureScenario = true)
     {
         Name = name;
         Weight = weight;
         MethodHandler = methodHandler;
-        Id = ++Counter;
+        Id = ScenarioIdGenerator.Next();
         MeasureScenario = measureScenario;
     }
 
@@ -19,7 +17,14 @@ public sealed class TestScenario
 
     public int Weight { get; set; }
 
-    public TestHandler MethodHandler { get; set; }
+    public TestHandler<T> MethodHandler { get; set; }
 
     public bool MeasureScenario { get; set; }
+}
+
+internal static class ScenarioIdGenerator
+{
+    private static int Counter;
+
+    internal static int Next() => Interlocked.Increment(ref Counter);
 }
