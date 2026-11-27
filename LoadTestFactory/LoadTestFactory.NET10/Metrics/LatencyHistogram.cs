@@ -14,7 +14,13 @@ internal sealed class LatencyHistogram
     // Positive Int64 values have exponents 0..62; index 0 is zero latency.
     private const int BucketCount = 1 + 63 * Subdivisions;
 
+    private const int PageBits = 8;
+    private const int PageSize = 1 << PageBits;
+    private readonly bool _sparse;
+    private long[][] _pages;
     private long[] _counts;
+
+    internal LatencyHistogram(bool sparse = false) => _sparse = sparse;
     private long _total;
 
     public long Count => _total;
@@ -24,21 +30,59 @@ internal sealed class LatencyHistogram
         if (stopwatchTicks < 0)
             throw new InvalidDataException("Negative elapsed time in a measurement.");
 
-        _counts ??= new long[BucketCount];
-        ++_counts[GetIndex(stopwatchTicks)];
+        AddCount(GetIndex(stopwatchTicks), 1);
         ++_total;
     }
 
     public void MergeFrom(LatencyHistogram other)
     {
-        if (other._counts == null)
+        if (other._total == 0)
             return;
 
-        _counts ??= new long[BucketCount];
-        for (int i = 0; i < BucketCount; ++i)
-            _counts[i] += other._counts[i];
-
+        if (!_sparse && !other._sparse)
+        {
+            _counts ??= new long[BucketCount];
+            for (int i = 0; i < BucketCount; ++i)
+                _counts[i] += other._counts[i];
+        }
+        else
+        {
+            foreach (var (index, count) in other.GetNonzeroCounts())
+                AddCount(index, count);
+        }
         _total += other._total;
+    }
+
+    private void AddCount(int index, long count)
+    {
+        if (!_sparse)
+        {
+            _counts ??= new long[BucketCount];
+            _counts[index] += count;
+            return;
+        }
+        _pages ??= new long[(BucketCount + PageSize - 1) / PageSize][];
+        long[] page = _pages[index >> PageBits] ??= new long[PageSize];
+        page[index & (PageSize - 1)] += count;
+    }
+
+    private IEnumerable<(int Index, long Count)> GetNonzeroCounts()
+    {
+        if (!_sparse)
+        {
+            if (_counts != null)
+                for (int i = 0; i < _counts.Length; ++i)
+                    if (_counts[i] != 0) yield return (i, _counts[i]);
+            yield break;
+        }
+        if (_pages == null) yield break;
+        for (int p = 0; p < _pages.Length; ++p)
+        {
+            long[] page = _pages[p];
+            if (page == null) continue;
+            for (int i = 0; i < page.Length; ++i)
+                if (page[i] != 0) yield return ((p << PageBits) + i, page[i]);
+        }
     }
 
     public long EstimatePercentile(double percentile)
@@ -50,11 +94,21 @@ internal sealed class LatencyHistogram
 
         long target = Math.Max(1, (long)Math.Ceiling(_total * percentile));
         long accumulated = 0;
-        for (int i = 0; i < _counts.Length; ++i)
+        if (!_sparse)
         {
-            accumulated += _counts[i];
-            if (accumulated >= target)
-                return Representative(i);
+            for (int i = 0; i < _counts.Length; ++i)
+            {
+                accumulated += _counts[i];
+                if (accumulated >= target) return Representative(i);
+            }
+        }
+        else
+        {
+            foreach (var (index, count) in GetNonzeroCounts())
+            {
+                accumulated += count;
+                if (accumulated >= target) return Representative(index);
+            }
         }
 
         throw new InvalidDataException("Latency histogram count mismatch.");

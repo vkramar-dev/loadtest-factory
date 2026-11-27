@@ -24,7 +24,7 @@ internal static class ConsoleOutput
     ];
 
     internal static void WriteHeader(int workers, int warmupSeconds, int durationSeconds,
-        int scenarios, TestEnvironment environment, IReadOnlyList<LoadTestWarning> warnings, string pathToFolder)
+        int scenarios, TestEnvironment environment, IReadOnlyList<LoadTestWarning> warnings, string pathToFolder, int? stepAmount = null)
     {
         try
         {
@@ -79,6 +79,14 @@ internal static class ConsoleOutput
             WriteMetric("Scenarios:", scenarios.ToString("N0"));
             WriteMetric("Warmup:", $"{warmupSeconds} seconds");
             WriteMetric("Measurement:", $"{durationSeconds} seconds");
+            if (stepAmount is int count)
+            {
+                WriteMetric("Test type:", "Stepped Load");
+                WriteMetric("Steps:", count.ToString("N0"));
+                WriteMetric("Step duration:", $"{durationSeconds / count} seconds (+ remainder on last step)");
+                WriteMetric("Stabilization:", "20% of each step");
+                Console.WriteLine("Live progress includes stabilization; final tables exclude it.");
+            }
             Separator();
             WriteWarnings(warnings);
             Console.WriteLine();
@@ -229,6 +237,21 @@ internal static class ConsoleOutput
         finally
         {
             Console.ForegroundColor = previousColor;
+        }
+    }
+
+    internal static void WriteResult(SteppedLoadTestResult result)
+    {
+        if (Console.IsOutputRedirected)
+        {
+            Console.WriteLine(result);
+            return;
+        }
+        Console.WriteLine(result.ToStringWithoutWarnings());
+        if (result.Warnings.Count > 0)
+        {
+            Console.WriteLine();
+            WriteWarnings(result.Warnings);
         }
     }
 

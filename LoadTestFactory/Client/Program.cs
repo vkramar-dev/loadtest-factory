@@ -17,7 +17,7 @@ TestScenario<int>[] tests = new TestScenario<int>[]
     CreateScenario2("C", 17),
     CreateScenario("D", 73),
     CreateScenario("E", 2),
-    CreateScenario2("F", 1),
+    CreateScenario2("F", 2),
     CreateScenario("G", 45),
     CreateScenario3("H", 13),
     CreateScenario("I", 44),
@@ -26,23 +26,24 @@ TestScenario<int>[] tests = new TestScenario<int>[]
     CreateScenario("L", 19),
     CreateScenario("M", 31),
     CreateScenario2("test-001", 5),
-    CreateScenario3("test-001", 1)
+    CreateScenario3("test-001", 2)
 };
 
-LoadTestResult result = await LoadTestRunner.RunAsync(Enumerable.Range(0, 16).ToArray(), 20, 20, tests);
+//LoadTestResult result = await LoadTestRunner.RunAsync(Enumerable.Range(0, 16).ToArray(), 20, 20, tests);
+SteppedLoadTestResult result = await LoadTestRunner.RunSteppedLoadAsync(Enumerable.Range(0, 100).ToArray(), 20, 120, 10, tests);
 
 
 static TestScenario<int> CreateScenario(string name, int weight)
 {
     return new TestScenario<int>(name, weight, async (context) =>
         {
-            await Task.Delay(0);
+            await Task.Delay(1);
 
             //throw new InvalidCastException();
 
             await MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
 
-            await Task.Delay(0);
+            await Task.Delay(2);
             //await Task.CompletedTask;
         }, false
     );
@@ -75,12 +76,12 @@ static TestScenario<int> CreateScenario3(string name, int weight)
         await Task.WhenAll(
     Task.Run(async () =>
     {
-        for (int i = 0; i < 10_000; i++)
-            await MeasuredCall.AsyncRun("test-001", () => Task.CompletedTask);
+        for (int i = 0; i < 100; i++)
+            await MeasuredCall.AsyncRun("test-001", () => Task.Delay(1));
     }),
     Task.Run(async () =>
     {
-        for (int i = 0; i < 10_000; i++)
+        for (int i = 0; i < 100; i++)
             await MeasuredCall.AsyncRun("test-002", () => Task.CompletedTask);
     })
 );

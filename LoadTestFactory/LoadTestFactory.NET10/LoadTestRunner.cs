@@ -131,6 +131,12 @@ public static class LoadTestRunner
         bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(parallelContexts);
+        ArgumentOutOfRangeException.ThrowIfLessThan(stepAmount, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(stepAmount, parallelContexts.Length);
+        if (durationInSeconds / stepAmount < 5)
+            throw new ArgumentException("Each load step must last at least 5 seconds.", nameof(durationInSeconds));
+
         GlobalState.CaptureState();
 
         LoadTestContext<T> ctx = new LoadTestContext<T>(parallelContexts, warmupInSeconds, durationInSeconds,
@@ -138,7 +144,7 @@ public static class LoadTestRunner
 
         try
         {
-            ctx.InitializeAndStartApp();
+            ctx.InitializeAndStartApp(stepAmount);
 
             ctx.StartMonitoringGC();
 
@@ -206,9 +212,9 @@ public static class LoadTestRunner
 
             await ctx.CompleteCollectors();
 
-            // TODO:
-
-            return new SteppedLoadTestResult();
+            SteppedLoadTestResult result = await ctx.CompileSteppedLoadTestResult(stepAmount, pauses);
+            ctx.WriteResultIntoConsole(result);
+            return result;
         }
         catch (Exception ex)
         {

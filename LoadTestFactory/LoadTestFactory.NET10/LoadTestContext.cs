@@ -80,7 +80,7 @@ internal sealed class LoadTestContext<T>
         CancellationToken = cancellationToken;
     }
 
-    internal void InitializeAndStartApp()
+    internal void InitializeAndStartApp(int? stepAmount = null)
     {
         ValidateParams(ParallelContexts, WarmupInSeconds, DurationInSeconds, Scenarios, WorkingDirectory);
 
@@ -95,7 +95,7 @@ internal sealed class LoadTestContext<T>
             try
             {
                 ConsoleOutput.WriteHeader(ParallelAmount, WarmupInSeconds, DurationInSeconds,
-                    Scenarios.Length, TestEnvironment, StartupWarning, GlobalState.PathToFolder);
+                    Scenarios.Length, TestEnvironment, StartupWarning, GlobalState.PathToFolder, stepAmount);
             }
             catch (Exception ex)
             {
@@ -316,6 +316,55 @@ internal sealed class LoadTestContext<T>
         };
 
         return Result;
+    }
+
+    internal async Task<SteppedLoadTestResult> CompileSteppedLoadTestResult(int stepAmount, GCPause[] pauses)
+    {
+        long metricsStartedAt = Stopwatch.GetTimestamp();
+        ConsoleStageProgress progress = TryStartStage(IsConsoleOutput, "Processing");
+        LoadTestStepResult[] steps;
+        TimeSpan processingDuration;
+        DateTimeOffset startedAt = new(ClockAnchorUtc.AddSeconds(WarmupInSeconds));
+        try
+        {
+            steps = await MetricsProcessor.ProcessSteppedAsync(Collectors, Scenarios,
+                MeasurementStartTimestamp, MeasurementEndTimestamp, DurationInSeconds,
+                stepAmount, ParallelAmount, startedAt, CancellationToken);
+            processingDuration = Stopwatch.GetElapsedTime(metricsStartedAt);
+        }
+        finally
+        {
+            if (progress != null)
+                await TryFinishStageAsync(progress);
+        }
+
+        return new SteppedLoadTestResult
+        {
+            ParallelAmount = ParallelAmount,
+            StepAmount = stepAmount,
+            WarmupDuration = TimeSpan.FromSeconds(WarmupInSeconds),
+            MeasurementDuration = TimeSpan.FromSeconds(DurationInSeconds),
+            ActualOverallDuration = Stopwatch.GetElapsedTime(OverallStartedAt),
+            MetricsProcessingDuration = processingDuration,
+            MeasurementStartedAtUtc = startedAt,
+            Environment = TestEnvironment,
+            Warnings = Warnings,
+            Engine = new EngineDiagnostics
+            {
+                BufferBlockingCount = BlockingCount,
+                TotalBufferBlockingTime = TimeSpan.FromSeconds(BlockingTicks / (double)Stopwatch.Frequency),
+                MaxBufferBlockingTime = TimeSpan.FromSeconds(MaxBlockingTicks / (double)Stopwatch.Frequency)
+            },
+            GcPauses = pauses,
+            Steps = steps
+        };
+    }
+
+    internal void WriteResultIntoConsole(SteppedLoadTestResult result)
+    {
+        if (!IsConsoleOutput) return;
+        try { ConsoleOutput.WriteResult(result); }
+        catch (Exception ex) { DiagnosticLogger.Write(ex, GlobalState.PathToFolder); }
     }
 
     internal void WriteResultIntoConsole()
