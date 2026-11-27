@@ -1,7 +1,4 @@
-using LoadTestFactory.Metrics;
 using LoadTestFactory.Notifications;
-using LoadTestFactory.Reports;
-using System.Diagnostics;
 
 namespace LoadTestFactory;
 
@@ -9,20 +6,20 @@ public static class LoadTestRunner
 {
     public static event EventHandler<LoadTestProgressEventArgs> ProgressChanged;
 
-    public static Task<LoadTestResult> RunAsync<T>(
-        T[] contexts,
+    public static Task<LoadTestResult> RunAsync(
+        int parallelAmount,
         int warmupInSeconds,
         int durationInSeconds,
-        TestHandler<T> scenario,
+        TestHandler<int> scenario,
         string workingDirectory = null,
         bool consoleOutput = true,
         CancellationToken cancellationToken = default)
     {
         return LoadTestRunner.RunAsync(
-            contexts,
+            Enumerable.Range(0, parallelAmount).ToArray(),
             warmupInSeconds,
             durationInSeconds,
-            new TestScenario<T>[] { new TestScenario<T>("Test Scenario", 1, scenario) },
+            new TestScenario<int>[] { new TestScenario<int>("Test Scenario", 1, scenario) },
             workingDirectory,
             consoleOutput,
             cancellationToken);

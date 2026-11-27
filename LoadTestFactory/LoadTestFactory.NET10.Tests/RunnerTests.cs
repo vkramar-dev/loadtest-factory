@@ -96,13 +96,21 @@ public class RunnerTests
         int[] contexts = [10, 20];
         var received = new System.Collections.Concurrent.ConcurrentDictionary<int, int>();
         DirectoryInfo directory = Directory.CreateTempSubdirectory("lte-values-");
-        try
-        {
-            var report = await LoadTestRunner.RunAsync<int>(contexts, 0, 1, async context =>
+
+        TestScenario<int>[] scenarios =
+        [
+            new("Test Scenario", 1, async context =>
             {
                 received.AddOrUpdate(context, 1, (_, count) => count + 1);
                 await Task.Delay(10);
-            }, workingDirectory: directory.FullName, consoleOutput: false);
+            })
+        ];
+
+        try
+        {
+            var report = await LoadTestRunner.RunAsync<int>(contexts, 0, 1, scenarios,
+                workingDirectory: directory.FullName, consoleOutput: false);
+
             Assert.Equal(contexts, received.Keys.OrderBy(value => value).ToArray());
             Assert.Equal(contexts.Length, report.ParallelAmount);
         }
@@ -115,11 +123,19 @@ public class RunnerTests
     [Fact]
     public async Task Null_and_empty_context_arrays_are_rejected()
     {
-        TestHandler<int> handler = _ => Task.CompletedTask;
+        TestScenario<int>[] scenarios =
+        [
+            new("Test Scenario", 1, async context =>
+            {
+                await Task.CompletedTask;
+            })
+        ];
+
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            LoadTestRunner.RunAsync<int>(null, 0, 1, handler, consoleOutput: false));
+            LoadTestRunner.RunAsync<int>(null, 0, 1, scenarios, consoleOutput: false));
+
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            LoadTestRunner.RunAsync(Array.Empty<int>(), 0, 1, handler, consoleOutput: false));
+            LoadTestRunner.RunAsync(Array.Empty<int>(), 0, 1, scenarios, consoleOutput: false));
     }
 
     [Fact]
