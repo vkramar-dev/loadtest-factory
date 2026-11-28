@@ -1,22 +1,18 @@
 ﻿using LoadTestFactory.Metrics;
 using LoadTestFactory.Notifications;
 using LoadTestFactory.Reports;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
+using System.Collections.Concurrent;
 using System.Data;
-using System.Diagnostics.Metrics;
-using System.Text;
 
 namespace LoadTestFactory;
 
 internal static class GlobalState
 {
+    internal readonly static ConcurrentDictionary<string, int> IdResolver = new();
+
     internal static string PathToFolder { get; private set; }
 
-    private static int ScenarioIdCounter;
-
-    private static int MeasuredCallIdCounter = 1024;
+    private static int IdCounter;
 
     private static int State;
 
@@ -32,16 +28,14 @@ internal static class GlobalState
         PathToFolder = pathToFolder;
     }
 
-    internal static int NextScenarioId() => Interlocked.Increment(ref ScenarioIdCounter);
-
-    internal static int NextMeasuredCallId() => Interlocked.Increment(ref MeasuredCallIdCounter);
+    internal static int NextId() => Interlocked.Increment(ref IdCounter);
 
     internal static void ReleaseState()
     {
         PathToFolder = null;
+        IdResolver.Clear();
+
         Interlocked.Exchange(ref State, 0);
-        ScenarioIdCounter = 0;
-        MeasuredCallIdCounter = 1024;
     }
 }
 

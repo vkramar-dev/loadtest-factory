@@ -8,7 +8,7 @@ public sealed class TestScenario<T>
         OriginalWeight = weight;
         Weight = weight;
         MethodHandler = methodHandler;
-        Id = GlobalState.NextScenarioId();
+        Id = GlobalState.NextId();
         MeasureScenario = measureScenario;
 
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual<int>(weight, 0, nameof(weight));
