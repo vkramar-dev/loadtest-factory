@@ -4,32 +4,44 @@ using LoadTestFactory.Reports;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Data;
+using System.Diagnostics.Metrics;
 using System.Text;
 
 namespace LoadTestFactory;
 
 internal static class GlobalState
 {
-    public static string PathToFolder { get; private set; }
+    internal static string PathToFolder { get; private set; }
 
-    private static int _state;
+    private static int ScenarioIdCounter;
 
-    public static void CaptureState()
+    private static int MeasuredCallIdCounter = 1024;
+
+    private static int State;
+
+    internal static void CaptureState()
     {
-        if (Interlocked.CompareExchange(ref _state, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref State, 1, 0) != 0)
             throw new InvalidOperationException(
                 "Another load test is already running.");
     }
 
-    public static void SetPathToFolder(string pathToFolder)
+    internal static void SetPathToFolder(string pathToFolder)
     {
         PathToFolder = pathToFolder;
     }
 
-    public static void ReleaseState()
+    internal static int NextScenarioId() => Interlocked.Increment(ref ScenarioIdCounter);
+
+    internal static int NextMeasuredCallId() => Interlocked.Increment(ref MeasuredCallIdCounter);
+
+    internal static void ReleaseState()
     {
         PathToFolder = null;
-        Interlocked.Exchange(ref _state, 0);
+        Interlocked.Exchange(ref State, 0);
+        ScenarioIdCounter = 0;
+        MeasuredCallIdCounter = 1024;
     }
 }
 
@@ -134,6 +146,11 @@ internal sealed class LoadTestContext<T>
             throw new ArgumentException(
                 "At least one scenario is required.",
                 nameof(scenarios));
+
+        for(int i = 0; i < scenarios.Length; ++i)
+            for(int j = scenarios.Length - 1; j > i; --j)
+                if (scenarios[i].Name == scenarios[j].Name)
+                    throw new DuplicateNameException($"Duplicated scenario: {scenarios[j].Name}");
 
         if (workingDirectory != null)
         {

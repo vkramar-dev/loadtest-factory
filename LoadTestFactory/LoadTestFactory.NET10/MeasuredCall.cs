@@ -5,13 +5,11 @@ namespace LoadTestFactory;
 public static class MeasuredCall
 {
     readonly static ConcurrentDictionary<string, int> IdResolver = new();
-    static int IdCounter = 1024;
-
     internal static KeyValuePair<string, int>[] GetRegisteredCalls() => IdResolver.ToArray();
 
     public static async Task AsyncRun(string name, Func<Task> testCallHandler)
     {
-        int callId = IdResolver.GetOrAdd(name, static _ => Interlocked.Increment(ref IdCounter));
+        int callId = IdResolver.GetOrAdd(name, static _ => GlobalState.NextMeasuredCallId());
 
         MetricsCollector collector = MetricsCollector.Current.Value;
         if (collector == null)
@@ -43,7 +41,7 @@ public static class MeasuredCall
 
     public static async Task<T> AsyncRun<T>(string name, Func<Task<T>> testCallHandler)
     {
-        int callId = IdResolver.GetOrAdd(name, static _ => Interlocked.Increment(ref IdCounter));
+        int callId = IdResolver.GetOrAdd(name, static _ => GlobalState.NextMeasuredCallId());
 
         MetricsCollector collector = MetricsCollector.Current.Value;
         if (collector == null)
