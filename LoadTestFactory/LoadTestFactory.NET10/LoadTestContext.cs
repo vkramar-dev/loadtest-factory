@@ -121,6 +121,7 @@ internal sealed class LoadTestContext<T>
 
         ArgumentNullException.ThrowIfNull(parallelContexts);
         ArgumentOutOfRangeException.ThrowIfLessThan(parallelContexts.Length, 1, nameof(parallelContexts));
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(parallelContexts.Length, 1024, nameof(parallelContexts));
 
         ArgumentOutOfRangeException.ThrowIfNegative(warmupInSeconds);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(warmupInSeconds, MaxDurationInSeconds);
